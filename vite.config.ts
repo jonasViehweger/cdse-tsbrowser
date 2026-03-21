@@ -14,6 +14,7 @@ const cdseApiProxy = {
 }
 
 export default defineConfig({
+  base: '/cdse-tsbrowser/',
   plugins: [vue()],
   server: {
     proxy: {
