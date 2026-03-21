@@ -43,7 +43,7 @@ export async function getValidToken(): Promise<string> {
   }
 
   if (!authStore.clientId || !authStore.clientSecret) {
-    throw new Error('No credentials configured. Please open Settings and enter your CDSE credentials.')
+    throw new Error('No credentials configured. Please open "Connect" in the top right and enter your CDSE credentials.')
   }
 
   await fetchToken(authStore.clientId, authStore.clientSecret)
