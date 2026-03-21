@@ -33,9 +33,6 @@
         {{ appStore.selectedDate ?? '—' }}
       </span>
 
-      <button class="refetch-btn" :disabled="loading" @click="refetch()">
-        {{ loading ? '…' : '↺' }}
-      </button>
     </div>
 
     <div v-if="error" class="ts-error">{{ error }}</div>
@@ -120,7 +117,7 @@ watch(() => props.params?.params, (p) => {
   }
 })
 
-const { data, loading, error, refetch } = useTimeSeries(dataSource, maskClouds)
+const { data, loading, error } = useTimeSeries(dataSource, maskClouds)
 
 // Publish visible (non-null) dates to the store for keyboard navigation.
 // This respects cloud masking and any future data modifiers — navigation
@@ -212,26 +209,6 @@ function onPointClick(date: string) {
 .yrange-sep {
   font-size: 0.8rem;
   color: var(--text-muted);
-}
-
-.refetch-btn {
-  background: var(--bg-input);
-  border: 1px solid var(--border-mid);
-  border-radius: 4px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.9rem;
-  padding: 3px 8px;
-  margin-left: auto;
-}
-
-.refetch-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-}
-
-.refetch-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .ts-error {

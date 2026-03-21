@@ -1,5 +1,6 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { useAppStore } from '../stores/app'
+import { useAuthStore } from '../stores/auth'
 import { fetchBandTimeSeries } from '../services/bandCache'
 import type { BandTimeSeries, TimeSeriesPoint } from '../types/api'
 import type { DataSource } from '../types/datasource'
@@ -48,6 +49,7 @@ export function useTimeSeries(
   maskClouds: Ref<boolean>,
 ): UseTimeSeriesReturn {
   const appStore = useAppStore()
+  const authStore = useAuthStore()
   const bandData = ref<BandTimeSeries | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -119,6 +121,14 @@ export function useTimeSeries(
       scheduleFetch(false)
     },
     { immediate: true, deep: true },
+  )
+
+  // Auto-fetch when the user authenticates (token transitions from absent to present).
+  watch(
+    () => authStore.isAuthenticated,
+    (authenticated, wasAuthenticated) => {
+      if (authenticated && !wasAuthenticated) scheduleFetch(true)
+    },
   )
 
   return { data, loading, error, refetch: () => scheduleFetch(true) }
