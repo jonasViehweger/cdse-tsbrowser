@@ -7,8 +7,9 @@
       </div>
 
       <p class="modal-description">
-        Enter your Copernicus Dataspace OAuth2 client credentials. These are stored in memory only
-        and are never saved to the URL or local storage.
+        Enter your Copernicus Dataspace OAuth2 client credentials.
+        See <a href="https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/Authentication.html" target="_blank" rel="noopener">the docs</a> on how to create them.
+        Make sure to check <strong>Will be used by single-page application</strong> and allow all domains (<strong>*</strong>).
       </p>
 
       <div class="form-group">
@@ -32,6 +33,11 @@
           autocomplete="current-password"
         />
       </div>
+
+      <label class="remember-label">
+        <input v-model="localRemember" type="checkbox" />
+        Remember me (saves credentials to localStorage)
+      </label>
 
       <div v-if="error" class="error-message">{{ error }}</div>
 
@@ -67,6 +73,7 @@ const authStore = useAuthStore()
 
 const localClientId = ref(authStore.clientId)
 const localClientSecret = ref(authStore.clientSecret)
+const localRemember = ref(authStore.isPersisted())
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -76,6 +83,8 @@ async function saveAndConnect() {
   try {
     authStore.setCredentials(localClientId.value, localClientSecret.value)
     await fetchToken(localClientId.value, localClientSecret.value)
+    if (localRemember.value) authStore.savePersisted()
+    else authStore.clearPersisted()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     loading.value = false
@@ -87,8 +96,10 @@ async function saveAndConnect() {
 function disconnect() {
   authStore.clearToken()
   authStore.setCredentials('', '')
+  authStore.clearPersisted()
   localClientId.value = ''
   localClientSecret.value = ''
+  localRemember.value = false
 }
 </script>
 
@@ -172,6 +183,22 @@ function disconnect() {
 
 .form-group input:focus {
   border-color: var(--accent);
+}
+
+.modal-description a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.remember-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  cursor: pointer;
+  user-select: none;
 }
 
 .error-message {

@@ -4,6 +4,7 @@ import 'dockview-vue/dist/styles/dockview.css'
 import './styles/themes.css'
 import App from './App.vue'
 import { useAuthStore } from './stores/auth'
+import { fetchToken } from './services/auth'
 import { useCampaignStore } from './stores/campaign'
 import { saveCampaignSchema } from './utils/campaignIdb'
 import { parseUrl } from './utils/url'
@@ -31,11 +32,19 @@ async function init() {
   app.component('campaignUploadPanel', CampaignUploadPanel)
   app.component('labellingFormPanel', LabellingFormPanel)
 
-  // Pre-populate credentials from .env.local during development
+  const authStore = useAuthStore()
+
+  // Load persisted credentials (localStorage), then allow dev env to override.
+  authStore.loadPersisted()
   const devClientId = import.meta.env.VITE_CDSE_CLIENT_ID as string | undefined
   const devClientSecret = import.meta.env.VITE_CDSE_CLIENT_SECRET as string | undefined
   if (devClientId && devClientSecret) {
-    useAuthStore().setCredentials(devClientId, devClientSecret)
+    authStore.setCredentials(devClientId, devClientSecret)
+  }
+
+  // Auto-fetch token if credentials are available (persisted or dev).
+  if (authStore.clientId && authStore.clientSecret) {
+    await fetchToken(authStore.clientId, authStore.clientSecret).catch(() => {})
   }
 
   // If a campaign is referenced in the URL, load all its data from IDB
