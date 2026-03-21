@@ -1,0 +1,177 @@
+{
+  "name": "2 - Interpretation Layout",
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "branch",
+              "data": [
+                {
+                  "type": "leaf",
+                  "data": {
+                    "views": [
+                      "mapPanel-1"
+                    ],
+                    "activeView": "mapPanel-1",
+                    "id": "5"
+                  },
+                  "size": 621
+                },
+                {
+                  "type": "leaf",
+                  "data": {
+                    "views": [
+                      "map-main"
+                    ],
+                    "activeView": "map-main",
+                    "id": "4"
+                  },
+                  "size": 621
+                },
+                {
+                  "type": "leaf",
+                  "data": {
+                    "views": [
+                      "waybackPanel-1"
+                    ],
+                    "activeView": "waybackPanel-1",
+                    "id": "7"
+                  },
+                  "size": 622
+                }
+              ],
+              "size": 287
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "ts-ndvi"
+                ],
+                "activeView": "ts-ndvi",
+                "id": "1"
+              },
+              "size": 287
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "ts-ndmi"
+                ],
+                "activeView": "ts-ndmi",
+                "id": "2"
+              },
+              "size": 289.33331298828125
+            }
+          ],
+          "size": 1864
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "flagEditorPanel"
+                ],
+                "activeView": "flagEditorPanel",
+                "id": "6"
+              },
+              "size": 288
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "labellingFormPanel"
+                ],
+                "activeView": "labellingFormPanel",
+                "id": "3"
+              },
+              "size": 287
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "campaignMapPanel"
+                ],
+                "activeView": "campaignMapPanel",
+                "id": "8"
+              },
+              "size": 288.33331298828125
+            }
+          ],
+          "size": 634
+        }
+      ],
+      "size": 863.3333129882812
+    },
+    "width": 2498,
+    "height": 863.3333129882812,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "mapPanel-1": {
+      "id": "mapPanel-1",
+      "contentComponent": "mapPanel",
+      "title": "Map"
+    },
+    "map-main": {
+      "id": "map-main",
+      "contentComponent": "mapPanel",
+      "params": {
+        "activeLayer": "FALSE-COLOR"
+      },
+      "title": "Map"
+    },
+    "ts-ndvi": {
+      "id": "ts-ndvi",
+      "contentComponent": "timeSeriesPanel",
+      "params": {
+        "dataSourceId": "S2_NDVI",
+        "maskClouds": true
+      },
+      "title": "NDVI"
+    },
+    "ts-ndmi": {
+      "id": "ts-ndmi",
+      "contentComponent": "timeSeriesPanel",
+      "params": {
+        "dataSourceId": "S2_NDMI",
+        "maskClouds": true
+      },
+      "title": "NDMI"
+    },
+    "flagEditorPanel": {
+      "id": "flagEditorPanel",
+      "contentComponent": "flagEditorPanel",
+      "title": "Flag Editor"
+    },
+    "labellingFormPanel": {
+      "id": "labellingFormPanel",
+      "contentComponent": "labellingFormPanel",
+      "title": "Labelling Form"
+    },
+    "waybackPanel-1": {
+      "id": "waybackPanel-1",
+      "contentComponent": "waybackPanel",
+      "params": {
+        "selectedLayerNumber": 12457
+      },
+      "title": "Wayback"
+    },
+    "campaignMapPanel": {
+      "id": "campaignMapPanel",
+      "contentComponent": "campaignMapPanel",
+      "title": "Campaign Map"
+    }
+  },
+  "activeGroup": "7"
+}

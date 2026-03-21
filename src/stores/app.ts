@@ -1,0 +1,109 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import type { Flags, FlagLabels } from '../types/state'
+
+const today = new Date().toISOString().slice(0, 10)
+const fiveYearsAgo = new Date(Date.now() - 5 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+
+export const useAppStore = defineStore('app', () => {
+  const theme = ref<'dark' | 'light'>(
+    (localStorage.getItem('theme') as 'dark' | 'light' | null) ?? 'dark'
+  )
+
+  function toggleTheme() {
+    theme.value = theme.value === 'dark' ? 'light' : 'dark'
+    localStorage.setItem('theme', theme.value)
+  }
+
+  const coordinate = ref<[number, number]>([11.1464, 48.9207])
+  const selectedDate = ref<string | null>(null)
+  const startDate = ref<string>(fiveYearsAgo)
+  const endDate = ref<string>(today)
+  const flags = ref<Flags>({})
+  const flagLabels = ref<FlagLabels>({})
+  /** Temporary labelling state for the currently selected campaign sample.
+   *  Updated immediately on every form edit; written to IDB only on Save & Next. */
+  const sampleMeta = ref<Record<string, unknown>>({})
+  /** Sorted list of all observed dates for the current location — set by the active TimeSeriesPanel. */
+  const chartDates = ref<string[]>([])
+  /** Incremented each time keyboard shortcut 'f' is pressed, watched by FlagEditorPanel to focus its select. */
+  const flagDropdownFocusTick = ref(0)
+  /** Incremented each time keyboard shortcut 'n' is pressed, watched by CampaignMapPanel to trigger Save & Next. */
+  const saveAndNextTick = ref(0)
+
+  function setCoordinate(lon: number, lat: number) {
+    coordinate.value = [lon, lat]
+  }
+
+  function setSelectedDate(date: string | null) {
+    selectedDate.value = date
+  }
+
+  function setDateRange(start: string, end: string) {
+    startDate.value = start
+    endDate.value = end
+  }
+
+  function setFlags(f: Flags) {
+    flags.value = f
+  }
+
+  function setFlagLabels(fl: FlagLabels) {
+    flagLabels.value = fl
+  }
+
+  function setSampleMeta(meta: Record<string, unknown>) {
+    sampleMeta.value = meta
+  }
+
+  function setMetaField(key: string, value: unknown) {
+    sampleMeta.value[key] = value
+  }
+
+  function setFlag(date: string, value: string) {
+    flags.value[date] = value
+  }
+
+  function removeFlag(date: string) {
+    delete flags.value[date]
+  }
+
+  function setChartDates(dates: string[]) {
+    chartDates.value = dates
+  }
+
+  function requestFlagDropdownFocus() {
+    flagDropdownFocusTick.value++
+  }
+
+  function requestSaveAndNext() {
+    saveAndNextTick.value++
+  }
+
+  return {
+    coordinate,
+    selectedDate,
+    startDate,
+    endDate,
+    flags,
+    flagLabels,
+    sampleMeta,
+    chartDates,
+    flagDropdownFocusTick,
+    saveAndNextTick,
+    setCoordinate,
+    setSelectedDate,
+    setDateRange,
+    setFlags,
+    setFlagLabels,
+    setSampleMeta,
+    setMetaField,
+    setFlag,
+    removeFlag,
+    setChartDates,
+    requestFlagDropdownFocus,
+    requestSaveAndNext,
+    theme,
+    toggleTheme,
+  }
+})

@@ -1,0 +1,29 @@
+{
+  "name": "cdse-tsbrowser",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dockview-vue": "^4.0.0",
+    "leaflet": "^1.9.4",
+    "pinia": "^2.1.7",
+    "uplot": "^1.6.32",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.21",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0",
+    "vitest": "^3.2.4",
+    "vue-tsc": "^2.0.0"
+  }
+}

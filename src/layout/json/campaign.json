@@ -1,0 +1,71 @@
+{
+  "name": "1 - Campaign Admin",
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "campaignUploadPanel"
+                ],
+                "activeView": "campaignUploadPanel",
+                "id": "11"
+              },
+              "size": 431
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": [
+                  "campaignAdminPanel"
+                ],
+                "activeView": "campaignAdminPanel",
+                "id": "10"
+              },
+              "size": 432.33331298828125
+            }
+          ],
+          "size": 1249
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "views": [
+              "campaignMapPanel"
+            ],
+            "activeView": "campaignMapPanel",
+            "id": "8"
+          },
+          "size": 1249
+        }
+      ],
+      "size": 863.3333129882812
+    },
+    "width": 2498,
+    "height": 863.3333129882812,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "campaignMapPanel": {
+      "id": "campaignMapPanel",
+      "contentComponent": "campaignMapPanel",
+      "title": "Campaign Map"
+    },
+    "campaignAdminPanel": {
+      "id": "campaignAdminPanel",
+      "contentComponent": "campaignAdminPanel",
+      "title": "Campaign Admin"
+    },
+    "campaignUploadPanel": {
+      "id": "campaignUploadPanel",
+      "contentComponent": "campaignUploadPanel",
+      "title": "Upload / Export"
+    }
+  },
+  "activeGroup": "10"
+}

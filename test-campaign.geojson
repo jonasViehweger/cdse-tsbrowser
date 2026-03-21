@@ -1,0 +1,67 @@
+{
+  "type": "FeatureCollection",
+  "campaign": {
+    "name": "Forest Disturbance 2020",
+    "startDate": "2017-01-01",
+    "endDate": "2023-12-31",
+    "flagLabels": {
+      "1": "disturbance",
+      "2": "recovery"
+    },
+    "fields": [
+      { "key": "sample_id",   "label": "Sample ID",   "type": "display",  "required": true,  "session_persistent": false },
+      { "key": "confidence",  "label": "Confidence",  "type": "select",   "options": ["High", "Medium", "Low"], "required": true,  "session_persistent": false },
+      { "key": "comment",     "label": "Comment",     "type": "text",     "required": false, "session_persistent": false },
+      { "key": "interpreter", "label": "Interpreter", "type": "text",     "required": true,  "session_persistent": true }
+    ]
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [11.146429, 48.920711] },
+      "properties": {
+        "sample_id": "plot_001",
+        "flags": { "2020-07-13": "1", "2021-08-02": "2" },
+        "confidence": "High",
+        "comment": "Clear bark beetle signal, recovery visible by 2021",
+        "interpreter": "jdoe"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [11.203847, 48.874532] },
+      "properties": {
+        "sample_id": "plot_002",
+        "flags": { "2019-06-15": "1" },
+        "confidence": "Medium",
+        "comment": "",
+        "interpreter": "jdoe"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [11.078312, 48.951004] },
+      "properties": {
+        "sample_id": "plot_003"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [11.165000, 48.893000] },
+      "properties": {
+        "sample_id": "plot_004"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [11.132000, 48.940000] },
+      "properties": {
+        "sample_id": "plot_005",
+        "flags": { "2018-09-10": "1" },
+        "confidence": "Low",
+        "comment": "Ambiguous signal, possible storm damage",
+        "interpreter": "jsmith"
+      }
+    }
+  ]
+}
