@@ -24,6 +24,12 @@ export const useAppStore = defineStore('app', () => {
   /** Temporary labelling state for the currently selected campaign sample.
    *  Updated immediately on every form edit; written to IDB only on Save & Next. */
   const sampleMeta = ref<Record<string, unknown>>({})
+  /**
+   * Sample ID from the URL when no campaign features are loaded (e.g. User B
+   * viewing a shared URL without the campaign in their IDB). Used as a fallback
+   * in campaignStore.currentSampleId so the form renders correctly.
+   */
+  const urlSampleId = ref<string | null>(null)
   /** Sorted list of all observed dates for the current location — set by the active TimeSeriesPanel. */
   const chartDates = ref<string[]>([])
   /** Incremented each time keyboard shortcut 'f' is pressed, watched by FlagEditorPanel to focus its select. */
@@ -54,6 +60,10 @@ export const useAppStore = defineStore('app', () => {
 
   function setSampleMeta(meta: Record<string, unknown>) {
     sampleMeta.value = meta
+  }
+
+  function setUrlSampleId(id: string | null) {
+    urlSampleId.value = id
   }
 
   function setMetaField(key: string, value: unknown) {
@@ -88,6 +98,7 @@ export const useAppStore = defineStore('app', () => {
     flags,
     flagLabels,
     sampleMeta,
+    urlSampleId,
     chartDates,
     flagDropdownFocusTick,
     saveAndNextTick,
@@ -97,6 +108,7 @@ export const useAppStore = defineStore('app', () => {
     setFlags,
     setFlagLabels,
     setSampleMeta,
+    setUrlSampleId,
     setMetaField,
     setFlag,
     removeFlag,

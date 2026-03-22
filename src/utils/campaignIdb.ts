@@ -80,12 +80,14 @@ export async function loadCampaignFeatures(name: string): Promise<CampaignFeatur
 // ── Records (labelling results) ──────────────────────────────────────────────
 
 export async function saveCampaignRecords(name: string, records: Record<string, SampleRecord>): Promise<void> {
+  // JSON round-trip strips Vue reactive proxies so IDB structured clone doesn't throw
+  const plain = JSON.parse(JSON.stringify(records)) as Record<string, SampleRecord>
   const db = await openDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction('campaign-records', 'readwrite')
-    tx.objectStore('campaign-records').put(records, name)
+    tx.objectStore('campaign-records').put(plain, name)
     tx.oncomplete = () => { db.close(); resolve() }
-    tx.onerror   = () => { db.close(); reject(tx.error) }
+    tx.onerror   = () => { db.close(); console.error('[IDB] saveCampaignRecords error', tx.error); reject(tx.error) }
   })
 }
 

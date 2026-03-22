@@ -16,6 +16,8 @@ export interface CampaignParams {
   name: string
   flagLabels?: Record<string, string>
   fields?: CampaignField[]
+  startDate?: string
+  endDate?: string
 }
 
 /** A single sample's labelled properties stored in localStorage. */

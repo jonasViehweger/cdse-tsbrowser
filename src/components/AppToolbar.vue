@@ -90,6 +90,7 @@ import { useCampaignStore } from '../stores/campaign'
 import { PANEL_PLUGINS, type PanelPlugin } from '../plugins/registry'
 import { LAYOUT_PRESETS } from '../layout/presets'
 import { listCampaignNames } from '../utils/campaignIdb'
+import type { SampleRecord } from '../types/campaign'
 
 defineEmits<{ openSettings: []; openShortcuts: [] }>()
 
@@ -101,20 +102,45 @@ const campaignStore = useCampaignStore()
 const campaignNames = ref<string[]>([])
 
 async function refreshCampaignNames() {
-  try { campaignNames.value = await listCampaignNames() }
-  catch { campaignNames.value = [] }
+  try {
+    const names = await listCampaignNames()
+    // The active campaign might not be in IDB yet (race with async schema write).
+    // Always include it so the select has a matching option immediately.
+    const current = campaignStore.schema?.name
+    if (current && !names.includes(current)) names.push(current)
+    campaignNames.value = names
+  } catch {
+    campaignNames.value = []
+  }
 }
 
 async function onCampaignChange(e: Event) {
   const name = (e.target as HTMLSelectElement).value
+
+  // Auto-save current draft before switching campaigns
+  const prevSampleId = campaignStore.currentSampleId
+  if (prevSampleId && campaignStore.isActive && !campaignStore.isEphemeral) {
+    const record: SampleRecord = { ...appStore.sampleMeta }
+    if (Object.keys(appStore.flags).length) record.flags = appStore.flags
+    campaignStore.saveSampleRecord(prevSampleId, record)
+  }
+
   if (!name) { campaignStore.clear(); return }
   await campaignStore.loadFromIdb(name)
-  const firstFeat = campaignStore.features.find(
-    f => campaignStore.labellingStatus(f.properties.sample_id) === 'unlabelled'
-  ) ?? campaignStore.features[0]
-  if (firstFeat) {
-    const [lon, lat] = firstFeat.geometry.coordinates
-    appStore.setCoordinate(lon, lat)
+
+  // Only navigate to first unlabelled if the current coordinate isn't already in this campaign
+  const [lon, lat] = appStore.coordinate
+  const alreadyHere = campaignStore.features.some(
+    f => f.geometry.coordinates[0] === lon && f.geometry.coordinates[1] === lat
+  )
+  if (!alreadyHere) {
+    const firstFeat = campaignStore.features.find(
+      f => campaignStore.labellingStatus(f.properties.sample_id) === 'unlabelled'
+    ) ?? campaignStore.features[0]
+    if (firstFeat) {
+      const [flon, flat] = firstFeat.geometry.coordinates
+      appStore.setCoordinate(flon, flat)
+    }
   }
 }
 

@@ -8,7 +8,9 @@ The app runs entirely in the browser (no backend). It uses **Vue 3** + **Vite** 
 
 ## URL Schema
 
-The URL encodes the session state so it can be shared. All parameter names are lowercase. Scalar fields are plain query parameters. Structured fields are URL-encoded JSON (not base64) so they remain inspectable in browser DevTools. JSON keys within structured fields use camelCase.
+The URL is the **complete, self-contained state** of what you are looking at. It contains enough information to reconstruct the full view from scratch — including the labelling schema — without any local state. This enables frictionless sharing: paste a URL to a colleague and they see exactly what you see.
+
+All parameter names are lowercase. Scalar fields are plain query parameters. Structured fields are URL-encoded JSON (not base64) so they remain inspectable in browser DevTools. JSON keys within structured fields use camelCase.
 
 **Parameters:**
 
@@ -19,54 +21,47 @@ The URL encodes the session state so it can be shared. All parameter names are l
 | `start` | date | Time-series start date (YYYY-MM-DD) |
 | `end` | date | Time-series end date (YYYY-MM-DD) |
 | `selected` | date | Currently selected date |
-| `sample` | JSON | Per-sample observation data (flags, field values) |
-| `campaign` | JSON | Campaign schema (name, flag vocabulary, field definitions) |
+| `sample` | JSON | Per-sample observation data (sample_id, flags, field values) |
+| `schema` | JSON | Labelling schema — always fully embedded, never just a name reference |
 
 `start` and `end` are always top-level params — both for single-sample and campaign URLs. The campaign's date range is expressed via the same params.
 
-### Single-sample URL
+### `schema` object
 
-Used for sharing a pre-configured single observation point.
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign` | string | OPTIONAL: Name of the labelling campaign |
+| `flagLabels` | dict | Key: Flag code, Value: Human-readable label |
+| `fields` | array | OPTIONAL: Ordered field definitions for the labelling form |
 
-```
-https://example.com/?
-  lon=11.146429&
-  lat=48.920711&
-  start=2017-01-01&
-  end=2023-12-31&
-  selected=2020-07-13&
-  sample={"flags":{"2018-02-14":"1","2020-07-13":"1"},"flagLabels":{"1":"disturbance","2":"recovery"},"comment":"bark beetle 2020","interpreter":"jdoe"}
-```
+`schema` is present whenever there are flag labels or a campaign active. When a campaign is active, the full schema (including `fields`) is always embedded so the URL is self-contained.
 
-### Campaign URL
+### `sample` object
 
-When a labelling campaign is active, `campaign` encodes the schema. Per-sample labelled data is stored in `localStorage` keyed by campaign name and is not in the URL.
+| Field | Type | Description |
+|-------|------|-------------|
+| `sample_id` | string | OPTIONAL: ID of this sample point |
+| `flags` | dict | Key: Date (YYYY-MM-DD), Value: Flag code |
+| *(other field keys)* | value | Values for fields defined in `schema.fields` |
 
-```
-https://example.com/?
-  lon=11.146429&
-  lat=48.920711&
-  start=2017-01-01&
-  end=2023-12-31&
-  campaign={"name":"Forest Disturbance 2020","flagLabels":{"1":"disturbance","2":"recovery"},"fields":[...]}
-```
+`sample` mirrors GeoJSON feature properties: `flags` plus any named field values. It is omitted when there is no observation data.
 
-### Combined URL
+### Sharing workflow
 
-A `sample` and `campaign` param may appear together. In this case `sample` is the authoritative observation data and is displayed as-is; `campaign` contributes only the schema (flag vocabulary, field definitions for display). localStorage is not consulted. This is useful for sharing a specific observation within a campaign context.
+1. **User A** is labelling a campaign sample and is uncertain. They copy the URL.
+   - URL contains: `lon`/`lat`, `start`/`end`, `schema` (full schema including campaign name and field definitions), `sample` (current form values and flags, including `sample_id`).
+2. **User B** opens the URL. They may or may not have the campaign in their local IDB.
+   - If the campaign is in their IDB with a **matching schema** → loads from IDB, URL sample data shown as draft.
+   - If the campaign is in their IDB with a **mismatched schema** → URL data displayed but Save & Next is blocked with a schema mismatch error.
+   - If the campaign is **not in their IDB** → schema loaded ephemerally from the URL (not persisted), Save & Next is blocked.
+3. User B edits the form, copies the new URL, sends it back.
+4. **User A** opens the returned URL. Their campaign loads from IDB (schemas match), URL sample data overrides the draft state for that sample. They hit Save & Next to commit.
 
-```
-https://example.com/?
-  lon=11.146429&lat=48.920711&start=2017-01-01&end=2023-12-31&selected=2020-07-13&
-  sample={"flags":{"2020-07-13":"1"},"comment":"bark beetle"}&
-  campaign={"name":"Forest Disturbance 2020","flagLabels":{"1":"disturbance","2":"recovery"},"fields":[...]}
-```
-
-If only `campaign` is present (no `sample`), per-sample data is loaded from localStorage for the current coordinate.
-
-On campaign file upload, `campaign`, `start`, and `end` in the URL are updated to reflect the loaded campaign schema, making the post-upload state bookmarkable and shareable.
-
-If neither `sample` nor `campaign` is present, any existing observation data is displayed read-only.
+**Key rules:**
+- URL state takes precedence over IDB state for the current sample's draft (flags + field values).
+- IDB is the authoritative store for committed records (post Save & Next).
+- Schema mismatch (deep equality check on `flagLabels` + `fields`) blocks saving but not viewing.
+- A URL-embedded schema is never automatically persisted to IDB — the user must explicitly upload/import a campaign.
 
 ---
 
@@ -81,15 +76,50 @@ coordinate:    [lon: float, lat: float]
 selectedDate:  date | null
 startDate:     date
 endDate:       date
-flags:         { [date: string]: string }
-flagLabels:    { [value: string]: string }
+flags:         { [date: string]: string }     ← current draft flags for this sample
+flagLabels:    { [value: string]: string }    ← driven from active schema
+sampleMeta:    { [key: string]: unknown }     ← current draft form values for this sample
 ```
 
-When a campaign is active, `flagLabels`, `startDate`, and `endDate` are driven by the campaign schema rather than the `sample` URL param.
+`flagLabels` is always driven from `campaignStore.schema.flagLabels` when a campaign is active. It is watched reactively in `App.vue` so all components stay in sync without manual propagation.
+
+`flags` and `sampleMeta` are **draft state**: they reflect the in-progress edit for the current sample. They are written to IDB only when the user hits Save & Next.
+
+### Campaign Store
+
+```
+schema:          CampaignParams | null    ← active schema (from IDB or ephemerally from URL)
+features:        CampaignFeature[]        ← all sample points (from IDB)
+sampleRecords:   Record<string, SampleRecord>  ← committed records (from IDB)
+schemaMismatch:  boolean                  ← URL schema ≠ IDB schema for same campaign name
+isEphemeral:     boolean                  ← schema loaded from URL without IDB backing
+```
+
+`schemaMismatch` and `isEphemeral` are checked by CampaignMapPanel to gate Save & Next.
+
+### Initialisation Order (main.ts)
+
+```
+1. Install Pinia
+2. Load persisted auth credentials → fetch token
+3. Parse URL
+4. If schema.campaign present:
+   a. Try loadFromIdb(name, urlSchema)
+      → if found: compare schemas → set schemaMismatch
+      → URL schema takes precedence for display
+   b. If not found: loadEphemeral(urlSchema) → isEphemeral = true
+5. app.mount()
+6. App.vue setup: restore coordinate, dates, flags, meta from URL
+7. App.vue watchEffect: sync all state → URL on every change
+```
 
 ### CDSE Authentication
 
-Satellite data is fetched from CDSE using **OAuth2 client credentials** (client ID + client secret). Credentials are entered via the **Connect** button in the toolbar and stored in browser memory for the session (never serialised into the URL). The access token is automatically refreshed before expiry. All CDSE and Esri Wayback APIs support CORS from any origin; the Vite dev-server proxy is only used during local development to avoid localhost-specific CORS restrictions.
+Satellite data is fetched from CDSE using **OAuth2 client credentials** (client ID + client secret). Credentials are entered via the **Connect** button in the toolbar. Two storage modes are offered:
+- **Session only** (default): stored in memory, lost on tab close.
+- **Remember me**: stored in `localStorage` under a fixed key. Retrieved on next load and used to auto-fetch a token.
+
+Credentials are never serialised into the URL. The access token is automatically refreshed before expiry. All CDSE and Esri Wayback APIs support CORS from any origin.
 
 ---
 
@@ -100,6 +130,7 @@ The toolbar is intentionally minimal. Coordinates and date range are configured 
 **Contents (left to right):**
 - App title
 - Layout preset selector (dropdown)
+- Campaign selector (dropdown — lists campaigns stored in IDB)
 - **`+ Add Panel`** dropdown — lists all registered plugins; clicking an entry adds a new panel
 - Connection status indicator (coloured dot)
 - **`Connect`** button — opens the credentials dialog
@@ -191,46 +222,42 @@ Leaflet map showing historical very-high-resolution Esri World Imagery tiles. De
 
 ---
 
-### Campaign Map *(planned)*
+### Campaign Map *(implemented)*
 
-Leaflet map showing all sample points of the active labelling campaign as markers. Clicking a marker sets `coordinate` to that point, triggering all other plugins to update. Markers are coloured by labelling status (unlabelled / partially labelled / complete).
+Leaflet map showing all sample points of the active labelling campaign as markers. Clicking a marker sets `coordinate` to that point. Markers are coloured by labelling status (unlabelled / complete).
 
----
-
-### Campaign Admin *(planned)*
-
-Panel for creating and configuring a labelling campaign. Contains:
-- Campaign name, start date, end date
-- Flag lookup table editor (shorthand code → description)
-- User-defined field schema editor (see Campaign section below)
-
-Updates `campaign`, `start`, and `end` in the URL on every change.
+The **Save & Next** button saves the current draft (`flags` + `sampleMeta`) to IDB and navigates to the next unlabelled sample. Save & Next is blocked when:
+- `isEphemeral` is true (no IDB campaign to save into)
+- `schemaMismatch` is true (URL schema differs from IDB schema)
+- Required fields are missing
 
 ---
 
-### Campaign Upload / Export *(planned)*
+### Campaign Admin *(implemented)*
+
+Panel for creating and configuring a labelling campaign schema: name, flag vocabulary, and field definitions. Applying the schema saves it to IDB and sets it as the active campaign.
+
+---
+
+### Campaign Upload / Export *(implemented)*
 
 Utility panel for loading and saving campaign data:
-- **Upload GeoJSON** — load a minimal point GeoJSON (coordinates + `sample_id`) to start a new campaign, or load an existing labelled campaign GeoJSON to resume work. Updates `campaignParams` in the URL.
-- **Export GeoJSON** — download the current campaign as a GeoJSON file.
+- **Upload GeoJSON** — load a full campaign GeoJSON (with embedded schema) or a minimal point GeoJSON (coordinates + `sample_id`).
+- **Export GeoJSON** — download the current campaign with all committed records.
 
 ---
 
-### Labelling Form *(planned)*
+### Labelling Form *(implemented)*
 
-A dynamically generated form rendered from the campaign's field schema. Displays and edits per-sample properties for the currently selected coordinate. Fields with `session_persistent: true` (e.g. `interpreter`) are pre-filled from the previous value.
+Dynamically generated form rendered from the active schema's `fields`. Displays and edits per-sample draft values (`sampleMeta` + `flags`) for the currently selected coordinate. Fields with `session_persistent: true` are pre-filled from the previous sample's saved value.
 
 ---
 
 ## Labelling Campaigns
 
-### Overview
-
-A labelling campaign organises work across many sample points. It extends the single-sample URL approach: the campaign schema (metadata + field definitions) lives in `campaignParams` in the URL; per-sample labelled data lives in `localStorage` keyed by campaign name.
-
 ### GeoJSON Format
 
-The campaign is stored as a GeoJSON `FeatureCollection`. A custom top-level key `campaign` holds all metadata to avoid conflicting with the GeoJSON spec:
+The campaign is stored as a GeoJSON `FeatureCollection`. A custom top-level key `campaign` holds all metadata:
 
 ```json
 {
@@ -293,35 +320,20 @@ A new campaign can be started from a plain GeoJSON containing only point geometr
 }
 ```
 
-All other properties are initialised to `null` on load.
+### IDB Storage
 
-### `campaign` URL Encoding
+Campaign data is stored in IndexedDB across three object stores:
 
-The campaign schema (not the per-sample data) is URL-encoded JSON in the `campaign` query parameter. Date range is always expressed via the top-level `start` and `end` params.
+| Store | Key | Value |
+|-------|-----|-------|
+| `campaign-schemas` | campaign name | `CampaignParams` |
+| `campaign-features` | campaign name | `CampaignFeature[]` |
+| `campaign-records` | campaign name | `Record<sample_id, SampleRecord>` |
 
-```json
-{
-  "name": "Forest Disturbance 2020",
-  "flagLabels": { "1": "disturbance", "2": "recovery" },
-  "fields": [...]
-}
-```
-
-Per-sample data is stored in `localStorage` under the key `cdse-ts-campaign-{name}`. On export, the schema and localStorage data are merged into the full GeoJSON. On upload, `campaign`, `start`, and `end` in the URL are updated to reflect the loaded campaign schema.
-
-### Workflow
-
-1. User opens app with a `campaign` URL, or uploads a GeoJSON via the Campaign Upload panel.
-2. The Campaign Map shows all sample points, coloured by labelling status.
-3. User clicks a point → `coordinate` is set → all other panels (time-series, S2 map, Wayback) update for that location. The campaign's `startDate`/`endDate` are used as the time-series range.
-4. User assigns flags via the Flag Editor and fills in the Labelling Form.
-5. Data is auto-saved to `localStorage` on every change.
-6. When done, user exports the full GeoJSON from the Campaign Upload/Export panel.
+Schema and features are written once on upload. Records are written on every Save & Next. Records are never stored in the URL — only the current draft for the selected sample is URL-encoded.
 
 ---
 
 ## Layout Presets
 
 Layout presets are JSON files in `src/layout/json/`. Each file is a raw dockview `toJSON()` snapshot with an optional top-level `"name"` field. The file `default.json` is used as the fallback layout. Additional presets appear in the toolbar dropdown. Users can save a layout by exporting from the browser console (`copy(JSON.stringify(window.__dockview.toJSON(), null, 2))`) and adding the file to the directory.
-
-A separate **Campaign** layout preset will be defined once the campaign plugins are implemented, containing the Campaign Map, Campaign Admin, Campaign Upload/Export, Time Series Plot, and Labelling Form panels.

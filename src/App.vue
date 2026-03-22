@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watchEffect, watch } from 'vue'
+import { ref, computed, watchEffect, watch, onUnmounted } from 'vue'
 import { DockviewVue, themeDark, themeLight } from 'dockview-vue'
 import type { DockviewReadyEvent } from 'dockview-vue'
 import AppToolbar from './components/AppToolbar.vue'
@@ -46,7 +46,7 @@ const showShortcuts = ref(false)
 useKeyboardShortcuts(() => { showShortcuts.value = !showShortcuts.value })
 
 // Parse URL synchronously during setup, before watchEffect first fires.
-// Campaign data was already loaded from IDB by main.ts before mount.
+// Campaign data was already loaded from IDB (or ephemerally) by main.ts before mount.
 const parsed = parseUrl(window.location.search)
 if (parsed.lon != null && parsed.lat != null) {
   appStore.setCoordinate(parsed.lon, parsed.lat)
@@ -57,39 +57,64 @@ if (parsed.start) {
 if (parsed.selected) {
   appStore.setSelectedDate(parsed.selected)
 }
-if (parsed.flags) {
-  appStore.setFlags(parsed.flags)
+// Flags come from sample.flags
+if (parsed.sample?.flags) {
+  appStore.setFlags(parsed.sample.flags)
 }
-// flagLabels: prefer campaign schema (already loaded from IDB), fall back to URL param
+// flagLabels: prefer campaign schema (already loaded), fall back to URL schema
 if (campaignStore.schema?.flagLabels) {
   appStore.setFlagLabels(campaignStore.schema.flagLabels)
-} else if (parsed.flagLabels) {
-  appStore.setFlagLabels(parsed.flagLabels)
+} else if (parsed.schema?.flagLabels) {
+  appStore.setFlagLabels(parsed.schema.flagLabels)
 }
-// meta: in-progress form values for the current sample (URL takes priority over IDB)
-if (parsed.meta) {
-  appStore.setSampleMeta(parsed.meta)
+// Form field values: sample minus flags (sample_id stored separately for fallback)
+if (parsed.sample) {
+  const { sample_id, flags: _flags, ...meta } = parsed.sample
+  if (sample_id) appStore.setUrlSampleId(sample_id as string)
+  if (Object.keys(meta).length) appStore.setSampleMeta(meta as Record<string, unknown>)
 }
 
+// Keep flagLabels in sync with the active campaign schema whenever it changes
+// (covers campaign switches, uploads, admin panel edits)
+watch(() => campaignStore.schema?.flagLabels, (fl) => {
+  if (fl) appStore.setFlagLabels(fl)
+})
+
 watchEffect(() => {
+  // Build sample: sample_id + flags + form field values
+  const sampleId = campaignStore.currentSampleId
+
+  const sampleObj: Record<string, unknown> = {}
+  if (sampleId)                            sampleObj.sample_id = sampleId
+  if (Object.keys(appStore.flags).length)  sampleObj.flags     = appStore.flags
+  Object.assign(sampleObj, appStore.sampleMeta)
+
+  // Build schema: full schema when campaign active, flagLabels-only otherwise
+  let schemaObj: { campaign?: string; flagLabels?: Record<string, string>; fields?: unknown[] } | undefined
+  if (campaignStore.isActive && campaignStore.schema) {
+    schemaObj = {
+      campaign:   campaignStore.schema.name,
+      flagLabels: campaignStore.schema.flagLabels,
+      fields:     campaignStore.schema.fields,
+    }
+  } else if (Object.keys(appStore.flagLabels).length) {
+    schemaObj = { flagLabels: appStore.flagLabels }
+  }
+
   const url = serialiseUrl({
-    lon: appStore.coordinate[0],
-    lat: appStore.coordinate[1],
-    start: appStore.startDate,
-    end: appStore.endDate,
+    lon:      appStore.coordinate[0],
+    lat:      appStore.coordinate[1],
+    start:    appStore.startDate,
+    end:      appStore.endDate,
     selected: appStore.selectedDate,
-    flags: Object.keys(appStore.flags).length ? appStore.flags : undefined,
-    // flagLabels only in URL when no campaign (campaign schema is the source of truth)
-    flagLabels: (!campaignStore.isActive && Object.keys(appStore.flagLabels).length)
-      ? appStore.flagLabels : undefined,
-    campaignName: campaignStore.schema?.name ?? null,
-    meta: (campaignStore.isActive && Object.keys(appStore.sampleMeta).length)
-      ? appStore.sampleMeta : undefined,
+    sample:   Object.keys(sampleObj).length ? sampleObj : undefined,
+    schema:   schemaObj,
   })
   history.replaceState(null, '', url)
 })
 
 let saveTimer = 0
+onUnmounted(() => clearTimeout(saveTimer))
 
 function onDockviewReady(event: DockviewReadyEvent) {
   layoutStore.setApi(event.api)

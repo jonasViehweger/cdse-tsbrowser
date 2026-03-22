@@ -1,12 +1,22 @@
 <template>
   <div class="admin-panel">
 
-    <!-- Campaign name -->
+    <!-- Campaign name + dates -->
     <div class="section">
       <div class="section-heading">Campaign</div>
       <div class="field-row">
         <label class="field-label">Name</label>
         <input v-model="name" type="text" class="field-input" placeholder="Campaign name…" />
+      </div>
+      <div class="date-row">
+        <div class="field-row">
+          <label class="field-label">Start date</label>
+          <input v-model="startDate" type="date" class="field-input" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">End date</label>
+          <input v-model="endDate" type="date" class="field-input" />
+        </div>
       </div>
     </div>
 
@@ -81,6 +91,8 @@ interface FlagEntry { key: string; label: string }
 interface FieldDef extends Omit<CampaignField, 'options'> { options?: string[] }
 
 const name = ref('')
+const startDate = ref('')
+const endDate = ref('')
 const flagEntries = ref<FlagEntry[]>([])
 const fields = ref<FieldDef[]>([])
 const applied = ref(false)
@@ -89,6 +101,8 @@ const applied = ref(false)
 watch(() => campaignStore.schema, (schema) => {
   if (!schema) return
   name.value = schema.name
+  startDate.value = schema.startDate ?? appStore.startDate
+  endDate.value = schema.endDate ?? appStore.endDate
   flagEntries.value = Object.entries(schema.flagLabels ?? {}).map(([key, label]) => ({ key, label }))
   fields.value = (schema.fields ?? []).map(f => ({ ...f }))
 }, { immediate: true })
@@ -109,6 +123,8 @@ function apply() {
   campaignStore.setSchema({
     name: name.value.trim(),
     flagLabels,
+    startDate: startDate.value || undefined,
+    endDate: endDate.value || undefined,
     fields: fields.value.map(f => ({
       key: f.key,
       label: f.label,
@@ -118,7 +134,6 @@ function apply() {
       session_persistent: f.session_persistent,
     })) as CampaignField[],
   })
-  appStore.setFlagLabels(flagLabels)
   applied.value = true
   setTimeout(() => { applied.value = false }, 2000)
 }
@@ -153,6 +168,12 @@ function apply() {
   flex-direction: column;
   gap: 4px;
   margin-bottom: 6px;
+}
+
+.date-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .field-label {

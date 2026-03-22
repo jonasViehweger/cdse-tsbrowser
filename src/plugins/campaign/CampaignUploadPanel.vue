@@ -48,9 +48,7 @@ function onFileChange(evt: Event) {
       if (geojson.campaign) {
         // Full campaign GeoJSON
         const camp = geojson as CampaignGeoJSON
-        campaignStore.loadGeoJSON(camp, camp.campaign.startDate, camp.campaign.endDate)
-        appStore.setDateRange(camp.campaign.startDate, camp.campaign.endDate)
-        if (camp.campaign.flagLabels) appStore.setFlagLabels(camp.campaign.flagLabels)
+        campaignStore.loadGeoJSON(camp)
         // Navigate to first feature
         if (camp.features.length > 0) {
           const [lon, lat] = camp.features[0].geometry.coordinates

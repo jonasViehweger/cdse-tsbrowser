@@ -39,18 +39,21 @@ const completedCount = computed(() =>
   campaignStore.features.filter(f => campaignStore.labellingStatus(f.properties.sample_id) === 'complete').length
 )
 
-const currentSampleId = computed<string | null>(() => {
-  const [lon, lat] = appStore.coordinate
-  const feat = campaignStore.features.find(
-    f => f.geometry.coordinates[0] === lon && f.geometry.coordinates[1] === lat
-  )
-  return feat?.properties.sample_id ?? null
-})
+const currentSampleId = computed(() => campaignStore.currentSampleId)
 
 const saveError = ref('')
 
 function saveAndNext() {
   if (!currentSampleId.value) return
+
+  if (campaignStore.isEphemeral) {
+    saveError.value = 'Campaign not in local library — cannot save'
+    return
+  }
+  if (campaignStore.schemaMismatch) {
+    saveError.value = 'Schema mismatch with local campaign — cannot save'
+    return
+  }
 
   const required = campaignStore.currentFields.filter(f => f.required && f.type !== 'display')
   const missing = required.filter(f => {
@@ -117,7 +120,6 @@ function buildMarkers() {
 watch(
   [() => campaignStore.features, () => campaignStore.sampleRecords, () => appStore.coordinate, () => appStore.theme],
   () => buildMarkers(),
-  { deep: true },
 )
 
 // Swap basemap when theme changes

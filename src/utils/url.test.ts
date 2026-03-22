@@ -1,116 +1,112 @@
 import { describe, it, expect } from 'vitest'
-import { parseUrl, serialiseUrl } from './url'
+import { parseUrl, serialiseUrl, deepEqual } from './url'
 
-const BASE_STATE = {
+const BASE: Parameters<typeof serialiseUrl>[0] = {
   lon: 13.4,
   lat: 52.5,
   start: '2025-12-01',
   end: '2026-02-28',
   selected: null,
-  flags: undefined,
-  flagLabels: undefined,
-  campaignName: null,
-  meta: undefined,
 }
 
-describe('flags round-trip', () => {
-  it('serialises and parses flags', () => {
+// ── serialiseUrl / parseUrl round-trips ──────────────────────────────────────
+
+describe('sample round-trip', () => {
+  it('serialises and parses flags inside sample', () => {
     const flags = { '2025-12-11': 'wet', '2025-12-27': 'dry' }
-    const url = serialiseUrl({ ...BASE_STATE, flags })
-    const parsed = parseUrl(url)
-    expect(parsed.flags).toEqual(flags)
+    const url = serialiseUrl({ ...BASE, sample: { flags } })
+    expect(parseUrl(url).sample?.flags).toEqual(flags)
   })
 
-  it('serialises and parses flagLabels (no-campaign mode)', () => {
+  it('serialises and parses sample_id', () => {
+    const url = serialiseUrl({ ...BASE, sample: { sample_id: 'plot_001', flags: {} } })
+    expect(parseUrl(url).sample?.sample_id).toBe('plot_001')
+  })
+
+  it('serialises and parses field values alongside flags', () => {
+    const sample = { sample_id: 'p1', flags: { '2025-12-11': '1' }, confidence: 'High', interpreter: 'jdoe' }
+    const url = serialiseUrl({ ...BASE, sample })
+    const parsed = parseUrl(url).sample!
+    expect(parsed.sample_id).toBe('p1')
+    expect(parsed.flags).toEqual({ '2025-12-11': '1' })
+    expect(parsed.confidence).toBe('High')
+    expect(parsed.interpreter).toBe('jdoe')
+  })
+
+  it('omits sample param when sample is empty', () => {
+    const url = serialiseUrl({ ...BASE, sample: {} })
+    expect(url).not.toContain('sample')
+  })
+
+  it('omits sample param when undefined', () => {
+    const url = serialiseUrl({ ...BASE })
+    expect(url).not.toContain('sample')
+  })
+})
+
+describe('schema round-trip', () => {
+  it('serialises and parses flagLabels', () => {
     const flagLabels = { wet: 'Flooding', dry: 'Drought' }
-    const url = serialiseUrl({ ...BASE_STATE, flagLabels })
-    expect(parseUrl(url).flagLabels).toEqual(flagLabels)
+    const url = serialiseUrl({ ...BASE, schema: { flagLabels } })
+    expect(parseUrl(url).schema?.flagLabels).toEqual(flagLabels)
   })
 
-  it('omits flagLabels from url when campaign is active', () => {
-    const url = serialiseUrl({
-      ...BASE_STATE,
-      flagLabels: { wet: 'Flooding' },
-      campaignName: 'My Campaign',
-    })
-    // flagLabels should not appear because campaign is active
-    expect(url).not.toContain('flagLabels')
-  })
-
-  it('preserves multiple flags on different dates', () => {
-    const flags = {
-      '2025-12-11': 'a',
-      '2025-12-22': 'b',
-      '2026-01-03': 'a',
-      '2026-02-10': 'c',
-    }
-    const url = serialiseUrl({ ...BASE_STATE, flags })
-    expect(parseUrl(url).flags).toEqual(flags)
-  })
-
-  it('omits flags param when flags are empty', () => {
-    const url = serialiseUrl({ ...BASE_STATE, flags: {} })
-    expect(url).not.toContain('flags')
-  })
-
-  it('returns undefined flags for malformed JSON', () => {
-    const parsed = parseUrl('?flags=' + encodeURIComponent('!!!notjson!!!'))
-    expect(parsed.flags).toBeUndefined()
-  })
-})
-
-describe('campaign param round-trip', () => {
-  it('serialises campaign as plain name and parses it back', () => {
-    const url = serialiseUrl({ ...BASE_STATE, campaignName: 'Forest Disturbance 2020' })
-    const parsed = parseUrl(url)
-    expect(parsed.campaignName).toBe('Forest Disturbance 2020')
-    expect(parsed.legacyCampaignSchema).toBeUndefined()
-  })
-
-  it('returns undefined campaignName when campaign param is absent', () => {
-    const parsed = parseUrl('?lon=13.4&lat=52.5')
-    expect(parsed.campaignName).toBeUndefined()
-  })
-})
-
-describe('legacy URL backward compat', () => {
-  it('parses legacy campaign JSON param and extracts name + schema', () => {
+  it('serialises and parses full campaign schema', () => {
     const schema = {
-      name: 'Forest Disturbance 2020',
-      flagLabels: { '1': 'disturbance', '2': 'recovery' },
-      fields: [{ key: 'sample_id', label: 'Sample ID', type: 'display' as const }],
+      campaign: 'Forest 2020',
+      flagLabels: { '1': 'disturbance' },
+      fields: [{ key: 'confidence', label: 'Confidence', type: 'select' as const, options: ['High', 'Low'], required: true, session_persistent: false }],
     }
-    const url = '?campaign=' + encodeURIComponent(JSON.stringify(schema))
-    const parsed = parseUrl(url)
-    expect(parsed.campaignName).toBe('Forest Disturbance 2020')
-    expect(parsed.legacyCampaignSchema?.flagLabels).toEqual({ '1': 'disturbance', '2': 'recovery' })
-    // flagLabels promoted from schema
-    expect(parsed.flagLabels).toEqual({ '1': 'disturbance', '2': 'recovery' })
+    const url = serialiseUrl({ ...BASE, schema })
+    const parsed = parseUrl(url).schema!
+    expect(parsed.campaign).toBe('Forest 2020')
+    expect(parsed.flagLabels).toEqual({ '1': 'disturbance' })
+    expect(parsed.fields).toEqual(schema.fields)
   })
 
-  it('parses legacy sample param and promotes flags/flagLabels/meta', () => {
-    const sd = {
-      flags: { '2025-12-11': 'wet' },
-      flagLabels: { wet: 'Flooding' },
-      confidence: 'High',
-    }
-    const url = '?sample=' + encodeURIComponent(JSON.stringify(sd))
-    const parsed = parseUrl(url)
-    expect(parsed.flags).toEqual({ '2025-12-11': 'wet' })
-    expect(parsed.flagLabels).toEqual({ wet: 'Flooding' })
-    expect(parsed.meta).toEqual({ confidence: 'High' })
+  it('omits schema param when undefined', () => {
+    const url = serialiseUrl({ ...BASE })
+    expect(url).not.toContain('schema')
   })
 })
 
-describe('meta round-trip', () => {
-  it('serialises and parses meta when campaign is active', () => {
-    const meta = { confidence: 'High', interpreter: 'jdoe' }
-    const url = serialiseUrl({ ...BASE_STATE, campaignName: 'My Campaign', meta })
-    expect(parseUrl(url).meta).toEqual(meta)
+// ── deepEqual ─────────────────────────────────────────────────────────────────
+
+describe('deepEqual', () => {
+  it('returns true for identical primitives', () => {
+    expect(deepEqual(1, 1)).toBe(true)
+    expect(deepEqual('a', 'a')).toBe(true)
   })
 
-  it('omits meta param when empty', () => {
-    const url = serialiseUrl({ ...BASE_STATE, campaignName: 'My Campaign', meta: {} })
-    expect(url).not.toContain('meta')
+  it('returns false for different primitives', () => {
+    expect(deepEqual(1, 2)).toBe(false)
+  })
+
+  it('returns true for deeply equal objects', () => {
+    expect(deepEqual({ a: 1, b: { c: 2 } }, { a: 1, b: { c: 2 } })).toBe(true)
+  })
+
+  it('returns false for objects with different values', () => {
+    expect(deepEqual({ a: 1 }, { a: 2 })).toBe(false)
+  })
+
+  it('returns false for objects with different keys', () => {
+    expect(deepEqual({ a: 1 }, { b: 1 })).toBe(false)
+  })
+
+  it('returns true for deeply equal arrays', () => {
+    expect(deepEqual([1, { a: 2 }], [1, { a: 2 }])).toBe(true)
+  })
+
+  it('returns false for arrays of different length', () => {
+    expect(deepEqual([1, 2], [1])).toBe(false)
+  })
+
+  it('compares CampaignParams-shaped objects correctly', () => {
+    const a = { name: 'foo', flagLabels: { '1': 'dist' }, fields: [{ key: 'k', type: 'text' }] }
+    const b = { name: 'foo', flagLabels: { '1': 'dist' }, fields: [{ key: 'k', type: 'text' }] }
+    const c = { name: 'foo', flagLabels: { '1': 'dist' }, fields: [{ key: 'k', type: 'select' }] }
+    expect(deepEqual(a, b)).toBe(true)
+    expect(deepEqual(a, c)).toBe(false)
   })
 })

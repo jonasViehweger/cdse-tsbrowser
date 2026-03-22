@@ -70,17 +70,14 @@ const campaignStore = useCampaignStore()
 
 const sampleMetaEntries = computed(() => Object.entries(appStore.sampleMeta))
 
-const currentSampleId = computed<string | null>(() => {
-  const [lon, lat] = appStore.coordinate
-  const feat = campaignStore.features.find(
-    f => f.geometry.coordinates[0] === lon && f.geometry.coordinates[1] === lat
-  )
-  return feat?.properties.sample_id ?? null
-})
+const currentSampleId = computed(() => campaignStore.currentSampleId)
 
 const currentFeatureProps = computed<Record<string, unknown>>(() => {
   const feat = campaignStore.features.find(f => f.properties.sample_id === currentSampleId.value)
-  return (feat?.properties ?? {}) as Record<string, unknown>
+  if (feat) return feat.properties as Record<string, unknown>
+  // Ephemeral: no features loaded, synthesise props from the known sample_id
+  if (currentSampleId.value) return { sample_id: currentSampleId.value }
+  return {}
 })
 
 const statusLabel = computed(() => {
@@ -109,7 +106,6 @@ watch(currentSampleId, (id, prevId) => {
   // shared URL with in-progress meta), keep them — they represent newer state.
   if (prevId == null &&
       (Object.keys(appStore.sampleMeta).length > 0 || Object.keys(appStore.flags).length > 0)) {
-    if (campaignStore.schema?.flagLabels) appStore.setFlagLabels(campaignStore.schema.flagLabels)
     return
   }
   // Load from IDB (buildInitialRecord returns saved record or session pre-fills)
@@ -117,9 +113,6 @@ watch(currentSampleId, (id, prevId) => {
   const { flags: recordFlags, ...metaFields } = record
   appStore.setFlags((recordFlags as Record<string, string>) ?? {})
   appStore.setSampleMeta(metaFields as Record<string, unknown>)
-  if (campaignStore.schema?.flagLabels) {
-    appStore.setFlagLabels(campaignStore.schema.flagLabels)
-  }
 }, { immediate: true })
 </script>
 

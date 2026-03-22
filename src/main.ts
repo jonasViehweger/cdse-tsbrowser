@@ -6,7 +6,6 @@ import App from './App.vue'
 import { useAuthStore } from './stores/auth'
 import { fetchToken } from './services/auth'
 import { useCampaignStore } from './stores/campaign'
-import { saveCampaignSchema } from './utils/campaignIdb'
 import { parseUrl } from './utils/url'
 import TimeSeriesPanel from './plugins/timeSeries/TimeSeriesPanel.vue'
 import FlagEditorPanel from './plugins/flagEditor/FlagEditorPanel.vue'
@@ -50,13 +49,18 @@ async function init() {
   // If a campaign is referenced in the URL, load all its data from IDB
   // *before* mounting so components see correct state immediately (no races).
   const parsed = parseUrl(window.location.search)
-  if (parsed.campaignName) {
-    // Legacy URL: full schema embedded — seed IDB so loadFromIdb finds it
-    if (parsed.legacyCampaignSchema) {
-      await saveCampaignSchema(parsed.legacyCampaignSchema.name, parsed.legacyCampaignSchema)
-        .catch(() => {})
+  if (parsed.schema?.campaign) {
+    const campaignStore = useCampaignStore()
+    const urlSchema = {
+      name:       parsed.schema.campaign,
+      flagLabels: parsed.schema.flagLabels,
+      fields:     parsed.schema.fields,
     }
-    await useCampaignStore().loadFromIdb(parsed.campaignName).catch(() => {})
+    const found = await campaignStore.loadFromIdb(parsed.schema.campaign, urlSchema).catch(() => false)
+    if (!found) {
+      // Campaign not in IDB — load ephemerally from URL schema
+      campaignStore.loadEphemeral(urlSchema)
+    }
   }
 
   app.mount('#app')

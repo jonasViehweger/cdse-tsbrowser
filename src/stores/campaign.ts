@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { CampaignParams, CampaignField, CampaignFeature, CampaignGeoJSON, SampleRecord } from '../types/campaign'
 import { saveCampaignFeatures, loadCampaignFeatures, saveCampaignRecords, loadCampaignRecords, saveCampaignSchema, loadCampaignSchema } from '../utils/campaignIdb'
+import { deepEqual } from '../utils/url'
+import { useAppStore } from './app'
 
 export const useCampaignStore = defineStore('campaign', () => {
   /** The active campaign schema. null = no campaign active. */
@@ -16,9 +18,35 @@ export const useCampaignStore = defineStore('campaign', () => {
   /** session_persistent field values — pre-fill next sample automatically. */
   const sessionValues = ref<Record<string, unknown>>({})
 
+  /**
+   * True when the URL schema and the IDB schema for the same campaign name differ.
+   * Save & Next is blocked while this is true.
+   */
+  const schemaMismatch = ref(false)
+
+  /**
+   * True when the active schema came from the URL without a matching IDB campaign.
+   * The campaign map will be empty and Save & Next is blocked.
+   */
+  const isEphemeral = ref(false)
+
+  const appStore = useAppStore()
+
   const isActive = computed(() => schema.value !== null)
 
   const currentFields = computed<CampaignField[]>(() => schema.value?.fields ?? [])
+
+  /**
+   * The sample_id of the feature at the current coordinate.
+   * Falls back to appStore.urlSampleId for shared URLs where the recipient
+   * doesn't have the campaign in their IDB (ephemeral mode, no features).
+   */
+  const currentSampleId = computed<string | null>(() => {
+    const [lon, lat] = appStore.coordinate
+    return features.value.find(
+      f => f.geometry.coordinates[0] === lon && f.geometry.coordinates[1] === lat
+    )?.properties.sample_id ?? appStore.urlSampleId
+  })
 
   /** Labelling status for each sample_id: 'unlabelled' | 'complete' */
   function labellingStatus(sampleId: string): 'unlabelled' | 'complete' {
@@ -32,51 +60,77 @@ export const useCampaignStore = defineStore('campaign', () => {
 
   /**
    * Load schema + features + records from IDB by campaign name.
-   * Called by main.ts before Vue mounts, so components always see populated state.
+   * Returns true if IDB had data for this campaign, false otherwise.
+   *
+   * If urlSchema is provided (from the URL's `schema` param):
+   * - It is used for display (URL takes precedence).
+   * - It is deep-compared to the IDB schema to set schemaMismatch.
+   *
    * If campaign-records is missing but features have embedded labelled properties,
    * the records are extracted from features and migrated to campaign-records.
    */
-  async function loadFromIdb(name: string): Promise<void> {
+  async function loadFromIdb(name: string, urlSchema?: CampaignParams): Promise<boolean> {
     const [storedSchema, storedFeatures, storedRecords] = await Promise.all([
       loadCampaignSchema(name),
       loadCampaignFeatures(name),
       loadCampaignRecords(name),
     ])
 
-    if (storedSchema) schema.value = storedSchema
+    if (!storedSchema && !storedFeatures) {
+      return false
+    }
+
+    // URL schema takes precedence for display; compare to IDB schema to detect mismatch
+    schema.value = urlSchema ?? storedSchema ?? null
+    schemaMismatch.value = !!(urlSchema && storedSchema && !deepEqual(urlSchema, storedSchema))
+
+    const effectiveSchema = schema.value
+    if (effectiveSchema?.startDate && effectiveSchema?.endDate) {
+      appStore.setDateRange(effectiveSchema.startDate, effectiveSchema.endDate)
+    }
+
     if (storedFeatures) features.value = storedFeatures
 
     if (storedRecords) {
       sampleRecords.value = storedRecords
-    } else if (storedFeatures) {
-      // Fallback: campaign-records was empty but features may have embedded
-      // labelled properties (e.g. from an older code version). Extract and migrate.
-      const fromFeatures: Record<string, SampleRecord> = {}
-      for (const feat of storedFeatures) {
-        const { sample_id, ...rest } = feat.properties as { sample_id: string; [key: string]: unknown }
-        if (Object.keys(rest).some(k => rest[k] != null)) {
-          fromFeatures[sample_id] = rest as SampleRecord
-        }
-      }
-      sampleRecords.value = fromFeatures
-      if (Object.keys(fromFeatures).length > 0) {
-        saveCampaignRecords(name, fromFeatures).catch(() => {})
-      }
     } else {
       sampleRecords.value = {}
     }
 
+    isEphemeral.value = false
     sessionValues.value = {}
+    return true
   }
 
-  function loadGeoJSON(geojson: CampaignGeoJSON, startDate: string, endDate: string) {
+  /**
+   * Load a schema from the URL without persisting to IDB.
+   * Used when a shared URL references a campaign not in local IDB.
+   * Save & Next will be blocked (isEphemeral = true).
+   */
+  function loadEphemeral(urlSchema: CampaignParams): void {
+    schema.value = urlSchema
+    features.value = []
+    sampleRecords.value = {}
+    sessionValues.value = {}
+    schemaMismatch.value = false
+    isEphemeral.value = true
+  }
+
+  function loadGeoJSON(geojson: CampaignGeoJSON) {
     const params: CampaignParams = {
       name: geojson.campaign.name,
       flagLabels: geojson.campaign.flagLabels,
       fields: geojson.campaign.fields,
+      startDate: geojson.campaign.startDate,
+      endDate: geojson.campaign.endDate,
     }
     schema.value = params
+    if (params.startDate && params.endDate) {
+      appStore.setDateRange(params.startDate, params.endDate)
+    }
     saveCampaignSchema(params.name, params).catch(() => {})
+    isEphemeral.value = false
+    schemaMismatch.value = false
     features.value = geojson.features
 
     // Extract any labelled properties already embedded in the GeoJSON
@@ -88,21 +142,21 @@ export const useCampaignStore = defineStore('campaign', () => {
       }
     }
 
-    // Merge with IDB records (IDB wins over embedded, GeoJSON file wins over nothing)
+    // Set immediate synchronous state; async merge refines it (IDB wins over file)
+    sampleRecords.value = fromFile
     loadCampaignRecords(geojson.campaign.name)
       .then(stored => {
-        sampleRecords.value = { ...fromFile, ...stored ?? {} }
+        if (stored) sampleRecords.value = { ...fromFile, ...stored }
         saveCampaignRecords(geojson.campaign.name, sampleRecords.value).catch(() => {})
       })
       .catch(() => {
-        sampleRecords.value = fromFile
+        // fromFile already set synchronously; persist it
         saveCampaignRecords(geojson.campaign.name, fromFile).catch(() => {})
       })
 
     // Persist features separately (large, written once)
     saveCampaignFeatures(geojson.campaign.name, geojson.features).catch(() => {})
 
-    void startDate; void endDate
   }
 
   function loadMinimalGeoJSON(geojson: { type: string; features: Array<{ type: string; geometry: CampaignFeature['geometry']; properties: { sample_id: string } }> }) {
@@ -111,6 +165,8 @@ export const useCampaignStore = defineStore('campaign', () => {
       geometry: f.geometry,
       properties: { sample_id: f.properties.sample_id },
     }))
+    isEphemeral.value = false
+    schemaMismatch.value = false
     features.value = mapped
     if (schema.value?.name) {
       saveCampaignFeatures(schema.value.name, mapped).catch(() => {})
@@ -175,12 +231,20 @@ export const useCampaignStore = defineStore('campaign', () => {
     }
   }
 
-  /** Activate a new campaign schema (e.g. from the admin panel). Saves to IDB. */
+  /** Activate a new campaign schema (e.g. from the admin panel). Saves to IDB.
+   *  Features and records are preserved when only schema properties change, not the name. */
   function setSchema(params: CampaignParams) {
+    const nameChanged = schema.value?.name !== params.name
     schema.value = params
-    features.value = []
-    sampleRecords.value = {}
-    sessionValues.value = {}
+    if (nameChanged) {
+      features.value = []
+      sampleRecords.value = {}
+      sessionValues.value = {}
+      saveCampaignRecords(params.name, {}).catch(() => {})
+    }
+    if (params.startDate && params.endDate) {
+      appStore.setDateRange(params.startDate, params.endDate)
+    }
     saveCampaignSchema(params.name, params).catch(() => {})
   }
 
@@ -189,16 +253,22 @@ export const useCampaignStore = defineStore('campaign', () => {
     features.value = []
     sampleRecords.value = {}
     sessionValues.value = {}
+    schemaMismatch.value = false
+    isEphemeral.value = false
   }
 
   return {
     schema,
     features,
     sampleRecords,
+    schemaMismatch,
+    isEphemeral,
     isActive,
     currentFields,
+    currentSampleId,
     labellingStatus,
     loadFromIdb,
+    loadEphemeral,
     setSchema,
     loadGeoJSON,
     loadMinimalGeoJSON,
