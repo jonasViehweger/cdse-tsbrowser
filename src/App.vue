@@ -6,6 +6,7 @@
     <div class="dock-host">
       <DockviewVue
         :theme="dockviewTheme"
+        :popout-url="`${import.meta.env.BASE_URL}popout.html`"
         right-header-actions-component="panelSettingsButton"
         @ready="onDockviewReady"
       />
