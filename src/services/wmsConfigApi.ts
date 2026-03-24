@@ -75,6 +75,82 @@ function evaluatePixel(s) {
   return [2.5*s.B08, 2.5*s.B04, 2.5*s.B03, s.dataMask];
 }`
 
+const NDVI_EVALSCRIPT = `//VERSION=3
+function setup() {
+   return {
+      input: ["B04", "B08", "dataMask"],
+      output: { bands: 4 }
+   };
+}
+
+const ramp = [
+   [-0.5, 0x0c0c0c],
+   [-0.2, 0xbfbfbf],
+   [-0.1, 0xdbdbdb],
+   [0, 0xeaeaea],
+   [0.025, 0xfff9cc],
+   [0.05, 0xede8b5],
+   [0.075, 0xddd89b],
+   [0.1, 0xccc682],
+   [0.125, 0xbcb76b],
+   [0.15, 0xafc160],
+   [0.175, 0xa3cc59],
+   [0.2, 0x91bf51],
+   [0.25, 0x7fb247],
+   [0.3, 0x70a33f],
+   [0.35, 0x609635],
+   [0.4, 0x4f892d],
+   [0.45, 0x3f7c23],
+   [0.5, 0x306d1c],
+   [0.55, 0x216011],
+   [0.6, 0x0f540a],
+   [1, 0x004400],
+];
+
+const visualizer = new ColorRampVisualizer(ramp);
+
+function evaluatePixel(samples) {
+   let ndvi = index(samples.B08, samples.B04);
+   let imgVals = visualizer.process(ndvi);
+   return imgVals.concat(samples.dataMask)
+}
+`
+
+const NDMI_EVALSCRIPT = `//VERSION=3
+const moistureRamps = [
+   [-0.8, 0x800000],
+   [-0.24, 0xff0000],
+   [-0.032, 0xffff00],
+   [0.032, 0x00ffff],
+   [0.24, 0x0000ff],
+   [0.8, 0x000080]
+];
+
+const viz = new ColorRampVisualizer(moistureRamps);
+
+function setup() {
+   return {
+      input: ["B8A", "B11", "dataMask"],
+      output: { bands: 4 }
+   };
+}
+
+function evaluatePixel(samples) {
+   let val = index(samples.B8A, samples.B11);
+   let imgVals = viz.process(val);
+   return imgVals.concat(samples.dataMask);
+}
+`
+
+const SWIR_FALSE_COLOR = `//VERSION=3
+function setup() {
+  return { input: [{bands: ['B08','B04','B11','dataMask'], units: 'DN'}], output: { bands: 4 } };
+}
+function evaluatePixel(s) {
+  return [s.B11/5000, s.B08/6000, s.B04/2000, s.dataMask];
+}
+`
+
 function layerBody(instanceId: string, id: string, title: string, evalScript: string) {
   return {
     id,
@@ -96,7 +172,19 @@ async function addLayers(instanceId: string): Promise<void> {
   })
   await authed(LAYERS_URL(instanceId), {
     method: 'POST',
-    body: JSON.stringify(layerBody(instanceId, 'FALSE-COLOR', 'False Color', FALSE_COLOR_EVALSCRIPT)),
+    body: JSON.stringify(layerBody(instanceId, 'FALSE-COLOR', 'False Color (B08, B04, B03)', FALSE_COLOR_EVALSCRIPT)),
+  })
+  await authed(LAYERS_URL(instanceId), {
+    method: 'POST',
+    body: JSON.stringify(layerBody(instanceId, 'SWIR_FALSE_COLOR', 'False Color (B11, B08, B04)', FALSE_COLOR_EVALSCRIPT)),
+  })
+  await authed(LAYERS_URL(instanceId), {
+    method: 'POST',
+    body: JSON.stringify(layerBody(instanceId, 'NDVI_EVALSCRIPT', 'NDVI', FALSE_COLOR_EVALSCRIPT)),
+  })
+  await authed(LAYERS_URL(instanceId), {
+    method: 'POST',
+    body: JSON.stringify(layerBody(instanceId, 'NDMI_EVALSCRIPT', 'NDMI', FALSE_COLOR_EVALSCRIPT)),
   })
 }
 
