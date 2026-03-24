@@ -6,7 +6,7 @@
     <div class="dock-host">
       <DockviewVue
         :theme="dockviewTheme"
-        :popout-url="`${import.meta.env.BASE_URL}popout.html`"
+        :popout-url="popoutUrl"
         right-header-actions-component="panelSettingsButton"
         @ready="onDockviewReady"
       />
@@ -49,6 +49,7 @@ watch(
 )
 
 const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeReplit : themeReplitDark)
+const popoutUrl = `${import.meta.env.BASE_URL}popout.html`
 const layoutStore = useLayoutStore()
 const campaignStore = useCampaignStore()
 const showSettings = ref(false)
