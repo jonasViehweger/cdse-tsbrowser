@@ -71,8 +71,8 @@
     </div>
 
     <div class="toolbar-right">
-      <button class="theme-btn" :title="`Switch to ${appStore.theme === 'dark' ? 'light' : 'dark'} theme`" @click="appStore.toggleTheme()">
-        {{ appStore.theme === 'dark' ? 'Light' : 'Dark' }}
+      <button class="theme-btn" :title="`Theme: ${appStore.theme} — click to cycle`" @click="appStore.toggleTheme()">
+        {{ appStore.theme === 'system' ? 'Auto' : appStore.theme === 'dark' ? 'Dark' : 'Light' }}
       </button>
       <button class="help-btn" title="Keyboard shortcuts (?)" @click="$emit('openShortcuts')">?</button>
       <span class="auth-indicator" :class="authClass" :title="authTitle"></span>

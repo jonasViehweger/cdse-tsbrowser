@@ -1,17 +1,25 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import type { Flags, FlagLabels } from '../types/state'
 
 const today = new Date().toISOString().slice(0, 10)
 const fiveYearsAgo = new Date(Date.now() - 5 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10)
 
 export const useAppStore = defineStore('app', () => {
-  const theme = ref<'dark' | 'light'>(
-    (localStorage.getItem('theme') as 'dark' | 'light' | null) ?? 'dark'
+  const CYCLE: Array<'system' | 'dark' | 'light'> = ['system', 'dark', 'light']
+  const stored = localStorage.getItem('theme') as 'system' | 'dark' | 'light' | null
+  const theme = ref<'system' | 'dark' | 'light'>(stored ?? 'system')
+
+  const mq = window.matchMedia('(prefers-color-scheme: dark)')
+  const systemPrefersDark = ref(mq.matches)
+  mq.addEventListener('change', e => { systemPrefersDark.value = e.matches })
+
+  const effectiveTheme = computed<'dark' | 'light'>(() =>
+    theme.value === 'system' ? (systemPrefersDark.value ? 'dark' : 'light') : theme.value
   )
 
   function toggleTheme() {
-    theme.value = theme.value === 'dark' ? 'light' : 'dark'
+    theme.value = CYCLE[(CYCLE.indexOf(theme.value) + 1) % CYCLE.length]
     localStorage.setItem('theme', theme.value)
   }
 
@@ -116,6 +124,7 @@ export const useAppStore = defineStore('app', () => {
     requestFlagDropdownFocus,
     requestSaveAndNext,
     theme,
+    effectiveTheme,
     toggleTheme,
   }
 })

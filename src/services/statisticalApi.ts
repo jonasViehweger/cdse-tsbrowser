@@ -104,14 +104,23 @@ export async function fetchRawBands(
     },
   }
 
-  const response = await fetch(STATISTICS_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
+  const MAX_RETRIES = 4
+  let response!: Response
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    response = await fetch(STATISTICS_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    })
+    if (response.status !== 429) break
+    if (attempt === MAX_RETRIES) break
+    const retryAfter = response.headers.get('Retry-After')
+    const delayMs = retryAfter ? parseFloat(retryAfter) * 1000 : 1000 * 2 ** attempt
+    await new Promise(r => setTimeout(r, delayMs))
+  }
 
   if (!response.ok) {
     let message: string

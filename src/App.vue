@@ -27,17 +27,18 @@ import { useLayoutStore } from './stores/layout'
 import { useCampaignStore } from './stores/campaign'
 import { parseUrl, serialiseUrl } from './utils/url'
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts'
+import type { CampaignField } from './types/campaign'
 
 const appStore = useAppStore()
 
 // Apply theme attribute to <html> so CSS variables switch instantly
 watch(
-  () => appStore.theme,
+  () => appStore.effectiveTheme,
   (t) => { document.documentElement.dataset.theme = t === 'light' ? 'light' : '' },
   { immediate: true }
 )
 
-const dockviewTheme = computed(() => appStore.theme === 'light' ? themeLight : themeDark)
+const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeLight : themeDark)
 const layoutStore = useLayoutStore()
 const campaignStore = useCampaignStore()
 const showSettings = ref(false)
@@ -90,7 +91,7 @@ watchEffect(() => {
   Object.assign(sampleObj, appStore.sampleMeta)
 
   // Build schema: full schema when campaign active, flagLabels-only otherwise
-  let schemaObj: { campaign?: string; flagLabels?: Record<string, string>; fields?: unknown[] } | undefined
+  let schemaObj: { campaign?: string; flagLabels?: Record<string, string>; fields?: CampaignField[] } | undefined
   if (campaignStore.isActive && campaignStore.schema) {
     schemaObj = {
       campaign:   campaignStore.schema.name,
