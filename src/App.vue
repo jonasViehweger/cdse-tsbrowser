@@ -1,5 +1,6 @@
 <template>
-  <div class="app-shell">
+  <HomeView v-if="showHome" />
+  <div v-else class="app-shell">
     <AppToolbar @open-settings="showSettings = true" @open-shortcuts="showShortcuts = true" />
 
     <div class="dock-host">
@@ -28,6 +29,7 @@ import type { DockviewReadyEvent } from 'dockview-vue'
 import AppToolbar from './components/AppToolbar.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import ShortcutsModal from './components/ShortcutsModal.vue'
+import HomeView from './views/HomeView.vue'
 
 import { useAppStore } from './stores/app'
 import { useLayoutStore } from './stores/layout'
@@ -56,6 +58,7 @@ useKeyboardShortcuts(() => { showShortcuts.value = !showShortcuts.value })
 // Parse URL synchronously during setup, before watchEffect first fires.
 // Campaign data was already loaded from IDB (or ephemerally) by main.ts before mount.
 const parsed = parseUrl(window.location.search)
+const showHome = parsed.lon == null && parsed.lat == null && !parsed.schema?.campaign
 if (parsed.lon != null && parsed.lat != null) {
   appStore.setCoordinate(parsed.lon, parsed.lat)
 }
@@ -89,6 +92,7 @@ watch(() => campaignStore.schema?.flagLabels, (fl) => {
 })
 
 watchEffect(() => {
+  if (showHome) return
   // Build sample: sample_id + flags + form field values
   const sampleId = campaignStore.currentSampleId
 

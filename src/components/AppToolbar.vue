@@ -1,5 +1,6 @@
 <template>
   <header class="toolbar">
+    <img src="/favicon.svg" alt="" class="toolbar-logo" />
     <span class="toolbar-title">CDSE TS Browser</span>
 
     <!-- Layout preset selector + save/delete -->
@@ -236,6 +237,12 @@ const authTitle = computed(() => {
   flex-shrink: 0;
   color: var(--text);
   font-size: 0.82rem;
+}
+
+.toolbar-logo {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
 .toolbar-title {
