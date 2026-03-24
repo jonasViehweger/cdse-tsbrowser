@@ -17,7 +17,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watchEffect, watch, onUnmounted } from 'vue'
-import { DockviewVue, themeDark, themeReplit } from 'dockview-vue'
+import { DockviewVue, themeReplit } from 'dockview-vue'
+
+const themeReplitDark = {
+  name: 'replit-dark',
+  className: 'dockview-theme-replit-dark',
+  gap: 10,
+}
 import type { DockviewReadyEvent } from 'dockview-vue'
 import AppToolbar from './components/AppToolbar.vue'
 import SettingsModal from './components/SettingsModal.vue'
@@ -39,7 +45,7 @@ watch(
   { immediate: true }
 )
 
-const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeReplit : themeDark)
+const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeReplit : themeReplitDark)
 const layoutStore = useLayoutStore()
 const campaignStore = useCampaignStore()
 const showSettings = ref(false)
@@ -178,5 +184,129 @@ body,
 .dock-host > div,
 .dock-host :deep([class*="dockview-theme"]) {
   height: 100%;
+}
+
+/* ── Dark Replit theme ─────────────────────────────────────────── */
+:global(.dockview-theme-replit-dark) {
+  --dv-paneview-active-outline-color: #C0CAB3;
+  --dv-tabs-and-actions-container-font-size: 13px;
+  --dv-tabs-and-actions-container-height: 35px;
+  --dv-drag-over-background-color: rgba(192, 202, 179, 0.15);
+  --dv-drag-over-border-color: transparent;
+  --dv-tabs-container-scrollbar-color: #3c4140;
+  --dv-icon-hover-background-color: rgba(67, 72, 70, 0.5);
+  --dv-floating-box-shadow: 8px 8px 8px 0px rgba(0, 0, 0, 0.5);
+  --dv-overlay-z-index: 999;
+  --dv-tab-font-size: inherit;
+  --dv-border-radius: 0px;
+  --dv-tab-margin: 0;
+  --dv-sash-color: #1a1b1b;
+  --dv-active-sash-color: #C0CAB3;
+  --dv-active-sash-transition-duration: 0.1s;
+  --dv-active-sash-transition-delay: 0.5s;
+
+  box-sizing: border-box;
+  padding: 10px;
+  background-color: #312f2f;
+
+  --dv-group-view-background-color: #312f2f;
+  --dv-tabs-and-actions-container-background-color: #121010;
+  --dv-activegroup-visiblepanel-tab-background-color: #2b2929;
+  --dv-activegroup-hiddenpanel-tab-background-color: #121010;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #252323;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #121010;
+  --dv-tab-divider-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: #E5E2E1;
+  --dv-activegroup-hiddenpanel-tab-color: #8D928F;
+  --dv-inactivegroup-visiblepanel-tab-color: #C3C7C5;
+  --dv-inactivegroup-hiddenpanel-tab-color: #8D928F;
+  --dv-separator-border: transparent;
+  --dv-paneview-header-border-color: #3c4140;
+}
+
+:global(.dockview-theme-replit-dark .dv-resize-container) {
+  border-radius: 10px !important;
+  border: none;
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview) {
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview .dv-tabs-and-actions-container) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview .dv-tabs-and-actions-container .dv-tab) {
+  margin: 4px;
+  border-radius: 8px;
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview .dv-tabs-and-actions-container .dv-tab .dv-svg) {
+  height: 8px;
+  width: 8px;
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview .dv-tabs-and-actions-container .dv-tab:hover) {
+  background-color: #434846 !important;
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview .dv-content-container) {
+  background-color: #1f1d1d;
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview.dv-active-group) {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:global(.dockview-theme-replit-dark .dv-groupview.dv-inactive-group) {
+  border: 1px solid transparent;
+}
+
+:global(.dockview-theme-replit-dark .dv-vertical > .dv-sash-container > .dv-sash) {
+  background-color: transparent;
+}
+:global(.dockview-theme-replit-dark .dv-vertical > .dv-sash-container > .dv-sash:not(.disabled)::after) {
+  content: '';
+  position: absolute;
+  height: 4px;
+  width: 40px;
+  border-radius: 2px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: var(--dv-sash-color);
+}
+:global(.dockview-theme-replit-dark .dv-vertical > .dv-sash-container > .dv-sash:not(.disabled):hover),
+:global(.dockview-theme-replit-dark .dv-vertical > .dv-sash-container > .dv-sash:not(.disabled):active) {
+  background-color: transparent;
+}
+:global(.dockview-theme-replit-dark .dv-vertical > .dv-sash-container > .dv-sash:not(.disabled):hover::after),
+:global(.dockview-theme-replit-dark .dv-vertical > .dv-sash-container > .dv-sash:not(.disabled):active::after) {
+  background-color: var(--dv-active-sash-color);
+}
+
+:global(.dockview-theme-replit-dark .dv-horizontal > .dv-sash-container > .dv-sash) {
+  background-color: transparent;
+}
+:global(.dockview-theme-replit-dark .dv-horizontal > .dv-sash-container > .dv-sash:not(.disabled)::after) {
+  content: '';
+  position: absolute;
+  height: 40px;
+  width: 4px;
+  border-radius: 2px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: var(--dv-sash-color);
+}
+:global(.dockview-theme-replit-dark .dv-horizontal > .dv-sash-container > .dv-sash:not(.disabled):hover),
+:global(.dockview-theme-replit-dark .dv-horizontal > .dv-sash-container > .dv-sash:not(.disabled):active) {
+  background-color: transparent;
+}
+:global(.dockview-theme-replit-dark .dv-horizontal > .dv-sash-container > .dv-sash:not(.disabled):hover::after),
+:global(.dockview-theme-replit-dark .dv-horizontal > .dv-sash-container > .dv-sash:not(.disabled):active::after) {
+  background-color: var(--dv-active-sash-color);
 }
 </style>
