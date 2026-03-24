@@ -16,9 +16,10 @@
     >
       <label class="field-row">
         <span class="field-label">Layer</span>
-        <select v-model="pendingLayer" class="field-select">
-          <option value="TRUE-COLOR">True Color</option>
-          <option value="FALSE-COLOR">False Color</option>
+        <select v-model="pendingLayer" class="field-select" :disabled="layersStatus !== 'ready'">
+          <option v-if="layersStatus === 'loading'" value="" disabled>Loading…</option>
+          <option v-else-if="layersStatus === 'error'" value="" disabled>Failed to load layers</option>
+          <option v-for="l in layers" :key="l.id" :value="l.id">{{ l.title }}</option>
         </select>
       </label>
     </PanelSettingsModal>
@@ -32,14 +33,15 @@ import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import { useLayoutStore } from '../../stores/layout'
 import { usePanelSettingsStore } from '../../stores/panelSettings'
-import { ensureWmsInstance } from '../../services/wmsConfigApi'
+import { ensureWmsInstance, listWmsLayers } from '../../services/wmsConfigApi'
+import type { WmsLayer } from '../../services/wmsConfigApi'
 import { useAuthStore } from '../../stores/auth'
 import { basemapUrl } from '../../utils/basemap'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 
 // dockview-vue passes a single `params` prop containing both the user-defined
 // params (under params.params) and the panel API (under params.api).
-type UserParams = { activeLayer?: 'TRUE-COLOR' | 'FALSE-COLOR' }
+type UserParams = { activeLayer?: string }
 type PanelApi = {
   id: string
   updateParameters(p: Record<string, unknown>): void
@@ -58,9 +60,12 @@ const layoutStore = useLayoutStore()
 const settingsStore = usePanelSettingsStore()
 
 const mapEl = ref<HTMLDivElement | null>(null)
-const activeLayer = ref<'TRUE-COLOR' | 'FALSE-COLOR'>(props.params?.params?.activeLayer ?? 'TRUE-COLOR')
+const activeLayer = ref<string>(props.params?.params?.activeLayer ?? 'TRUE-COLOR')
 const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorDetail = ref('')
+
+const layers = ref<WmsLayer[]>([])
+const layersStatus = ref<'loading' | 'ready' | 'error'>('loading')
 
 let map: L.Map | null = null
 let basemap: L.TileLayer | null = null
@@ -80,8 +85,8 @@ function timeParam(date: string | null): string {
   return `${date}T00:00:00Z/${date}T23:59:59Z`
 }
 
-function layerTitle(layer: 'TRUE-COLOR' | 'FALSE-COLOR'): string {
-  return layer === 'TRUE-COLOR' ? 'True Color' : 'False Color'
+function layerTitle(layerId: string): string {
+  return layers.value.find(l => l.id === layerId)?.title ?? layerId
 }
 
 function initMap(instanceId: string) {
@@ -131,12 +136,21 @@ async function setup() {
     status.value = 'error'
     errorDetail.value = e instanceof Error ? e.message : String(e)
   }
+  // Fetch layer list independently so map is usable even if this fails
+  try {
+    layers.value = await listWmsLayers()
+    layersStatus.value = 'ready'
+    // Update title now that we have the real layer name
+    panelApi()?.setTitle(layerTitle(activeLayer.value))
+  } catch {
+    layersStatus.value = 'error'
+  }
 }
 
 // ── Settings modal state ────────────────────────────────────────────────────
 
 const showSettings = ref(false)
-const pendingLayer = ref<'TRUE-COLOR' | 'FALSE-COLOR'>(activeLayer.value)
+const pendingLayer = ref<string>(activeLayer.value)
 
 function openSettings() {
   pendingLayer.value = activeLayer.value

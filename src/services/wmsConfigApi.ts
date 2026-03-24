@@ -142,7 +142,7 @@ function evaluatePixel(samples) {
 }
 `
 
-const SWIR_FALSE_COLOR = `//VERSION=3
+const SWIR_FALSE_COLOR_EVALSCRIPT = `//VERSION=3
 function setup() {
   return { input: [{bands: ['B08','B04','B11','dataMask'], units: 'DN'}], output: { bands: 4 } };
 }
@@ -176,35 +176,76 @@ async function addLayers(instanceId: string): Promise<void> {
   })
   await authed(LAYERS_URL(instanceId), {
     method: 'POST',
-    body: JSON.stringify(layerBody(instanceId, 'SWIR_FALSE_COLOR', 'False Color (B11, B08, B04)', FALSE_COLOR_EVALSCRIPT)),
+    body: JSON.stringify(layerBody(instanceId, 'SWIR_FALSE_COLOR', 'False Color (B11, B08, B04)', SWIR_FALSE_COLOR_EVALSCRIPT)),
   })
   await authed(LAYERS_URL(instanceId), {
     method: 'POST',
-    body: JSON.stringify(layerBody(instanceId, 'NDVI_EVALSCRIPT', 'NDVI', FALSE_COLOR_EVALSCRIPT)),
+    body: JSON.stringify(layerBody(instanceId, 'NDVI', 'NDVI', NDVI_EVALSCRIPT)),
   })
   await authed(LAYERS_URL(instanceId), {
     method: 'POST',
-    body: JSON.stringify(layerBody(instanceId, 'NDMI_EVALSCRIPT', 'NDMI', FALSE_COLOR_EVALSCRIPT)),
+    body: JSON.stringify(layerBody(instanceId, 'NDMI', 'NDMI', NDMI_EVALSCRIPT)),
   })
 }
+
+export interface WmsLayer { id: string; title: string }
+
+// In-flight guard: coalesces concurrent calls during first-time setup.
+let instanceInflight: Promise<string> | null = null
 
 /**
  * Returns the WMS instance ID for this app, creating it if it does not exist.
  * The result is cached in localStorage so subsequent calls are free.
+ * Concurrent calls during first-time setup are coalesced into one request.
  */
 export async function ensureWmsInstance(): Promise<string> {
   const cached = localStorage.getItem(INSTANCE_ID_KEY)
   if (cached) return cached
 
-  const token = await getValidToken()
-  const domainAccountId = domainAccountIdFromToken(token)
+  if (!instanceInflight) {
+    instanceInflight = (async () => {
+      try {
+        const token = await getValidToken()
+        const domainAccountId = domainAccountIdFromToken(token)
+        const instances = await listInstances(domainAccountId)
+        const existing = instances.find(i => i.name === INSTANCE_NAME)
+        const instanceId = existing ? existing.id : await createInstance(domainAccountId)
+        if (!existing) await addLayers(instanceId)
+        localStorage.setItem(INSTANCE_ID_KEY, instanceId)
+        return instanceId
+      } finally {
+        instanceInflight = null
+      }
+    })()
+  }
 
-  const instances = await listInstances(domainAccountId)
-  const existing = instances.find(i => i.name === INSTANCE_NAME)
+  return instanceInflight
+}
 
-  const instanceId = existing ? existing.id : await createInstance(domainAccountId)
-  if (!existing) await addLayers(instanceId)
+let layerCache: WmsLayer[] | null = null
+let layerInflight: Promise<WmsLayer[]> | null = null
 
-  localStorage.setItem(INSTANCE_ID_KEY, instanceId)
-  return instanceId
+/**
+ * Returns the list of WMS layers for this app's instance.
+ * Fetched once per session and cached in memory.
+ */
+export async function listWmsLayers(): Promise<WmsLayer[]> {
+  if (layerCache) return layerCache
+
+  if (!layerInflight) {
+    layerInflight = (async () => {
+      try {
+        const instanceId = await ensureWmsInstance()
+        const res = await authed(LAYERS_URL(instanceId))
+        layerCache = (await res.json() as WmsLayer[])
+          .map(l => ({ id: l.id, title: l.title }))
+          .sort((a, b) => a.title.localeCompare(b.title))
+        return layerCache
+      } finally {
+        layerInflight = null
+      }
+    })()
+  }
+
+  return layerInflight
 }
