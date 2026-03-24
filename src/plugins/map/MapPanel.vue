@@ -1,14 +1,27 @@
 <template>
   <div class="map-panel">
-    <div class="map-toolbar">
-      <select v-model="activeLayer" class="layer-select">
-        <option value="TRUE-COLOR">True Color</option>
-        <option value="FALSE-COLOR">False Color</option>
-      </select>
-      <span v-if="status === 'loading'" class="status-text">Setting up WMS instance…</span>
-      <span v-if="status === 'error'" class="status-error" :title="errorDetail">WMS setup failed</span>
+    <div v-if="status === 'loading'" class="map-status">
+      Setting up WMS instance…
+    </div>
+    <div v-else-if="status === 'error'" class="map-status map-status-error" :title="errorDetail">
+      WMS setup failed — {{ errorDetail }}
     </div>
     <div ref="mapEl" class="map-container"></div>
+
+    <PanelSettingsModal
+      v-if="showSettings"
+      title="Map Settings"
+      @cancel="showSettings = false"
+      @apply="applySettings"
+    >
+      <label class="field-row">
+        <span class="field-label">Layer</span>
+        <select v-model="pendingLayer" class="field-select">
+          <option value="TRUE-COLOR">True Color</option>
+          <option value="FALSE-COLOR">False Color</option>
+        </select>
+      </label>
+    </PanelSettingsModal>
   </div>
 </template>
 
@@ -18,14 +31,20 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import { useLayoutStore } from '../../stores/layout'
+import { usePanelSettingsStore } from '../../stores/panelSettings'
 import { ensureWmsInstance } from '../../services/wmsConfigApi'
 import { useAuthStore } from '../../stores/auth'
 import { basemapUrl } from '../../utils/basemap'
+import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 
 // dockview-vue passes a single `params` prop containing both the user-defined
 // params (under params.params) and the panel API (under params.api).
 type UserParams = { activeLayer?: 'TRUE-COLOR' | 'FALSE-COLOR' }
-type PanelApi = { updateParameters(p: Record<string, unknown>): void }
+type PanelApi = {
+  id: string
+  updateParameters(p: Record<string, unknown>): void
+  setTitle(title: string): void
+}
 
 const props = defineProps<{
   params?: { params?: UserParams; api?: PanelApi }
@@ -36,6 +55,7 @@ const panelApi = () => props.params?.api
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const layoutStore = useLayoutStore()
+const settingsStore = usePanelSettingsStore()
 
 const mapEl = ref<HTMLDivElement | null>(null)
 const activeLayer = ref<'TRUE-COLOR' | 'FALSE-COLOR'>(props.params?.params?.activeLayer ?? 'TRUE-COLOR')
@@ -60,6 +80,10 @@ function timeParam(date: string | null): string {
   return `${date}T00:00:00Z/${date}T23:59:59Z`
 }
 
+function layerTitle(layer: 'TRUE-COLOR' | 'FALSE-COLOR'): string {
+  return layer === 'TRUE-COLOR' ? 'True Color' : 'False Color'
+}
+
 function initMap(instanceId: string) {
   if (!mapEl.value || map) return
 
@@ -78,7 +102,7 @@ function initMap(instanceId: string) {
     format: 'image/jpeg',
     version: '1.1.1',
     transparent: false,
-    ...(time ? { TIME: time } : {}),
+    ...(time ? { TIME: time } as Record<string, string> : {}),
   }).addTo(map)
 
   // Sample point marker
@@ -109,6 +133,37 @@ async function setup() {
   }
 }
 
+// ── Settings modal state ────────────────────────────────────────────────────
+
+const showSettings = ref(false)
+const pendingLayer = ref<'TRUE-COLOR' | 'FALSE-COLOR'>(activeLayer.value)
+
+function openSettings() {
+  pendingLayer.value = activeLayer.value
+  showSettings.value = true
+}
+
+function applySettings() {
+  activeLayer.value = pendingLayer.value
+  panelApi()?.setTitle(layerTitle(activeLayer.value))
+  showSettings.value = false
+}
+
+// ── Panel settings bridge ───────────────────────────────────────────────────
+
+const panelId = computed(() => panelApi()?.id ?? '')
+
+watch(panelId, (id, oldId) => {
+  if (oldId) settingsStore.unregister(oldId)
+  if (id) settingsStore.register(id, openSettings)
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (panelId.value) settingsStore.unregister(panelId.value)
+})
+
+// ── Watchers ────────────────────────────────────────────────────────────────
+
 // Re-try setup when credentials become available
 watch(() => authStore.isAuthenticated, (authenticated) => {
   if (authenticated && status.value === 'idle') setup()
@@ -121,19 +176,19 @@ watch(selectedDate, (date) => {
   if (time) wmsLayer.setParams({ TIME: time })
 })
 
-// Persist setting and update WMS tiles whenever the active layer changes.
-// These are kept separate: persistence must happen even while WMS is still loading.
+// Persist and apply layer change
 watch(activeLayer, (layer) => {
   panelApi()?.updateParameters({ activeLayer: layer })
   layoutStore.saveLayout()
   if (wmsLayer) wmsLayer.setParams({ layers: layer })
 })
 
-// When dockview restores a layout via fromJSON(), it delivers params after
-// the component mounts. Sync them back into the local ref.
+// When dockview restores a layout via fromJSON(), it delivers params after mount.
 watch(() => props.params?.params, (p) => {
-  if (p?.activeLayer && p.activeLayer !== activeLayer.value)
+  if (p?.activeLayer && p.activeLayer !== activeLayer.value) {
     activeLayer.value = p.activeLayer
+    panelApi()?.setTitle(layerTitle(p.activeLayer))
+  }
 })
 
 // Update marker when coordinate changes
@@ -142,10 +197,11 @@ watch(coordinate, ([lon, lat]) => {
   map?.panTo([lat, lon])
 })
 
-// Swap basemap when theme changes
-watch(() => appStore.theme, () => { basemap?.setUrl(basemapUrl()) })
+// Swap basemap when effective theme changes
+watch(() => appStore.effectiveTheme, () => { basemap?.setUrl(basemapUrl()) })
 
 onMounted(() => {
+  panelApi()?.setTitle(layerTitle(activeLayer.value))
   if (authStore.isAuthenticated) setup()
 })
 
@@ -166,39 +222,57 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.map-toolbar {
+.map-status {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 8px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  font-size: 0.82rem;
-  color: var(--text);
-}
-
-.layer-select {
-  background: var(--bg-input);
-  border: 1px solid var(--border-mid);
-  border-radius: 4px;
-  color: var(--text);
-  font-size: 0.82rem;
-  padding: 3px 6px;
-}
-
-.status-text {
+  justify-content: center;
+  padding: 12px 16px;
+  font-size: 0.85rem;
   color: var(--text-muted);
   font-style: italic;
+  flex-shrink: 0;
 }
 
-.status-error {
+.map-status-error {
   color: var(--red);
+  font-style: normal;
   cursor: help;
+  background: var(--bg-error);
+  border-bottom: 1px solid var(--red);
 }
 
 .map-container {
   flex: 1;
   min-height: 0;
+}
+
+/* ── Settings modal fields ── */
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.field-label {
+  width: 90px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--text-sub);
+}
+
+.field-select {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border-mid);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.field-select:focus {
+  border-color: var(--accent);
 }
 </style>

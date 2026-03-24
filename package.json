@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "dockview-vue": "^4.0.0",
+    "dockview-vue": "^5.1.0",
     "leaflet": "^1.9.4",
     "pinia": "^2.1.7",
     "uplot": "^1.6.32",

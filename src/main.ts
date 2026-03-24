@@ -15,6 +15,7 @@ import CampaignMapPanel from './plugins/campaign/CampaignMapPanel.vue'
 import CampaignAdminPanel from './plugins/campaign/CampaignAdminPanel.vue'
 import CampaignUploadPanel from './plugins/campaign/CampaignUploadPanel.vue'
 import LabellingFormPanel from './plugins/campaign/LabellingFormPanel.vue'
+import PanelSettingsButton from './components/PanelSettingsButton.vue'
 
 async function init() {
   const app = createApp(App)
@@ -30,6 +31,7 @@ async function init() {
   app.component('campaignAdminPanel', CampaignAdminPanel)
   app.component('campaignUploadPanel', CampaignUploadPanel)
   app.component('labellingFormPanel', LabellingFormPanel)
+  app.component('panelSettingsButton', PanelSettingsButton)
 
   const authStore = useAuthStore()
 

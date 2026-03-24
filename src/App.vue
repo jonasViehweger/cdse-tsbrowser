@@ -5,6 +5,7 @@
     <div class="dock-host">
       <DockviewVue
         :theme="dockviewTheme"
+        right-header-actions-component="panelSettingsButton"
         @ready="onDockviewReady"
       />
     </div>
@@ -16,7 +17,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watchEffect, watch, onUnmounted } from 'vue'
-import { DockviewVue, themeDark, themeLight } from 'dockview-vue'
+import { DockviewVue, themeDark, themeReplit } from 'dockview-vue'
 import type { DockviewReadyEvent } from 'dockview-vue'
 import AppToolbar from './components/AppToolbar.vue'
 import SettingsModal from './components/SettingsModal.vue'
@@ -38,7 +39,7 @@ watch(
   { immediate: true }
 )
 
-const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeLight : themeDark)
+const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeReplit : themeDark)
 const layoutStore = useLayoutStore()
 const campaignStore = useCampaignStore()
 const showSettings = ref(false)
