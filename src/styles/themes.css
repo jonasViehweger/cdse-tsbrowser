@@ -1,75 +1,75 @@
 /*
  * Design tokens for CDSE TS Browser.
- * Dark theme (Catppuccin Mocha) is the default, applied via :root.
- * Light theme (Catppuccin Latte) activates when <html data-theme="light">.
+ * Dark theme is the default, applied via :root.
+ * Light theme activates when <html data-theme="light">.
  */
 
 :root {
   /* Backgrounds */
-  --bg:          #1e1e2e;   /* base   — main canvas */
-  --bg-panel:    #181825;   /* mantle — toolbars, headers */
-  --bg-input:    #313244;   /* surface0 — inputs, selects */
-  --bg-hover:    #45475a;   /* surface1 — hover states */
+  --bg:          #1f1d1d;   /* surface */
+  --bg-panel:    #121010;   /* below surface — toolbars, headers */
+  --bg-input:    #2b2929;   /* inputs, selects */
+  --bg-hover:    #434846;   /* surface-variant — hover states */
 
   /* Borders */
-  --border:      #313244;   /* surface0 */
-  --border-mid:  #45475a;   /* surface1 */
+  --border:      #2f3332;   /* outline-variant */
+  --border-mid:  #3c4140;
 
   /* Text */
-  --text:        #cdd6f4;
-  --text-sub:    #a6adc8;   /* subtext0 */
-  --text-muted:  #6c7086;   /* overlay0 */
+  --text:        #E5E2E1;   /* on-surface */
+  --text-sub:    #C3C7C5;   /* on-surface-variant */
+  --text-muted:  #8D928F;   /* outline */
 
   /* Accent / semantic colours */
-  --accent:      #89b4fa;   /* blue */
-  --green:       #a6e3a1;
-  --red:         #f38ba8;
-  --orange:      #fab387;
-  --cyan:        #89dceb;
-  --mauve:       #cba6f7;
-  --yellow:      #f9e2af;
-  --rosewater:   #eba0ac;
+  --accent:      #C0CAB3;   /* primary */
+  --green:       #8aab7a;
+  --red:         #FFB4AB;   /* error */
+  --orange:      #c9a876;
+  --cyan:        #7ab8b0;
+  --mauve:       #b4a0c8;
+  --yellow:      #d4c47a;
+  --rosewater:   #c49898;
 
   /* Semantic backgrounds */
-  --bg-error:    #3b0f0f;
-  --bg-success:  #1e3a2a;
-  --bg-warning:  #3a2a1e;
+  --bg-error:    #93000A;   /* error-container */
+  --bg-success:  #1a2e1a;
+  --bg-warning:  #2e2214;
 
   /* Overlay */
-  --bg-overlay:  rgba(0, 0, 0, 0.6);
+  --bg-overlay:  rgba(0, 0, 0, 0.7);
 }
 
 [data-theme="light"] {
   /* Backgrounds */
-  --bg:          #eff1f5;   /* Latte base */
-  --bg-panel:    #e6e9ef;   /* Latte mantle */
-  --bg-input:    #eff1f5;   /* Latte base — inputs lighter than panel */
-  --bg-hover:    #ccd0da;   /* Latte surface0 */
+  --bg:          #FCF9F6;   /* background */
+  --bg-panel:    #f0ebeb;   /* surface — toolbars, headers */
+  --bg-input:    #e8e4e0;   /* inputs, selects */
+  --bg-hover:    #DFE3E1;   /* surface-variant — hover states */
 
   /* Borders */
-  --border:      #bcc0cc;   /* Latte surface1 */
-  --border-mid:  #acb0be;   /* Latte surface2 */
+  --border:      #C3C7C5;   /* outline-variant */
+  --border-mid:  #a0a4a2;
 
   /* Text */
-  --text:        #4c4f69;
-  --text-sub:    #5c5f77;   /* Latte subtext1 */
-  --text-muted:  #8c8fa1;   /* Latte overlay1 */
+  --text:        #1B1C1A;   /* on-background */
+  --text-sub:    #434846;   /* on-surface-variant */
+  --text-muted:  #737876;   /* outline */
 
   /* Accent / semantic colours */
-  --accent:      #1e66f5;   /* Latte blue */
-  --green:       #40a02b;
-  --red:         #d20f39;
-  --orange:      #fe640b;
-  --cyan:        #04a5e5;
-  --mauve:       #8839ef;
-  --yellow:      #df8e1d;
-  --rosewater:   #dc8a78;
+  --accent:      #595D54;   /* secondary */
+  --green:       #3d7030;
+  --red:         #BA1A1A;   /* error */
+  --orange:      #7a5c18;
+  --cyan:        #1a6e78;
+  --mauve:       #5c4b80;
+  --yellow:      #6e5a10;
+  --rosewater:   #803040;
 
   /* Semantic backgrounds */
-  --bg-error:    #fce8e8;
-  --bg-success:  #e8f4ec;
+  --bg-error:    #FFDAD6;   /* error-container */
+  --bg-success:  #e0f0e8;
   --bg-warning:  #fef3e2;
 
   /* Overlay */
-  --bg-overlay:  rgba(0, 0, 0, 0.3);
+  --bg-overlay:  rgba(0, 0, 0, 0.35);
 }
