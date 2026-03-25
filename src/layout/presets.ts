@@ -40,4 +40,4 @@ export const LAYOUT_PRESETS: LayoutPreset[] = Object.entries(jsonModules).map(([
   }
 })
 
-export const DEFAULT_PRESET_ID = 'json-campaign'
+export const DEFAULT_PRESET_ID = 'json-default'
