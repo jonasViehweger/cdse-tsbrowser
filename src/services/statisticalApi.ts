@@ -117,9 +117,13 @@ export async function fetchRawBands(
     })
     if (response.status !== 429) break
     if (attempt === MAX_RETRIES) break
+    // Retry-After is in milliseconds per Sentinel Hub docs.
+    // Add full jitter (random 0–100% of base delay) so concurrent retries
+    // don't re-synchronize and immediately re-trigger the rate limit.
     const retryAfter = response.headers.get('Retry-After')
-    const delayMs = retryAfter ? parseFloat(retryAfter) * 1000 : 1000 * 2 ** attempt
-    await new Promise(r => setTimeout(r, delayMs))
+    const baseDelayMs = retryAfter ? parseFloat(retryAfter) : 1000 * 2 ** attempt
+    const jitter = Math.random() * baseDelayMs
+    await new Promise(r => setTimeout(r, baseDelayMs + jitter))
   }
 
   if (!response.ok) {
