@@ -69,7 +69,7 @@ function drawAnnotations(u: uPlot) {
     ctx.stroke()
 
     if (!seenValues.includes(flagValue)) {
-      const label = props.flagLabels[flagValue] ?? flagValue
+      const label = flagValue
       ctx.fillStyle = colour
       ctx.font = '11px sans-serif'
       ctx.fillText(label, cx + 4, u.bbox.top + 14)

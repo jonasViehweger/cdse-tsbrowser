@@ -37,6 +37,7 @@ import { ensureWmsInstance, listWmsLayers } from '../../services/wmsConfigApi'
 import type { WmsLayer } from '../../services/wmsConfigApi'
 import { useAuthStore } from '../../stores/auth'
 import { basemapUrl } from '../../utils/basemap'
+import { buildPixelPolygon } from '../../utils/geometry'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 
 // dockview-vue passes a single `params` prop containing both the user-defined
@@ -70,7 +71,7 @@ const layersStatus = ref<'loading' | 'ready' | 'error'>('loading')
 let map: L.Map | null = null
 let basemap: L.TileLayer | null = null
 let wmsLayer: L.TileLayer.WMS | null = null
-let marker: L.CircleMarker | null = null
+let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
 
 function wmsUrl(instanceId: string) {
@@ -85,6 +86,10 @@ function timeParam(date: string | null): string {
   return `${date}T00:00:00Z/${date}T23:59:59Z`
 }
 
+function pixelLatLngs(lon: number, lat: number): L.LatLngExpression[] {
+  return buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression)
+}
+
 function layerTitle(layerId: string): string {
   return layers.value.find(l => l.id === layerId)?.title ?? layerId
 }
@@ -95,7 +100,7 @@ function initMap(instanceId: string) {
   const [lon, lat] = coordinate.value
   map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView(
     [lat, lon],
-    14
+    16
   )
 
   basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
@@ -110,12 +115,11 @@ function initMap(instanceId: string) {
     ...(time ? { TIME: time } as Record<string, string> : {}),
   }).addTo(map)
 
-  // Sample point marker
-  marker = L.circleMarker([lat, lon], {
-    radius: 6,
-    color: 'var(--accent)',
-    fillColor: 'var(--accent)',
-    fillOpacity: 0.9,
+  // Pixel outline marker — outline only so the centre pixel stays visible.
+  // Bright yellow gives high contrast against natural earth tones in satellite imagery.
+  marker = L.polygon(pixelLatLngs(lon, lat), {
+    color: '#ffff00',
+    fillOpacity: 0,
     weight: 2,
   }).addTo(map)
 
@@ -207,7 +211,7 @@ watch(() => props.params?.params, (p) => {
 
 // Update marker when coordinate changes
 watch(coordinate, ([lon, lat]) => {
-  marker?.setLatLng([lat, lon])
+  marker?.setLatLngs(pixelLatLngs(lon, lat))
   map?.panTo([lat, lon])
 })
 

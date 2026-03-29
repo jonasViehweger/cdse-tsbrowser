@@ -43,6 +43,7 @@ import {
   type WaybackRelease,
 } from '../../services/waybackApi'
 import { basemapUrl } from '../../utils/basemap'
+import { buildPixelPolygon } from '../../utils/geometry'
 
 const props = defineProps<{
   params?: { params?: Record<string, unknown>; api?: { updateParameters(p: Record<string, unknown>): void } }
@@ -59,21 +60,18 @@ const errorDetail = ref('')
 let map: L.Map | null = null
 let basemap: L.TileLayer | null = null
 let tileLayer: L.TileLayer | null = null
-let marker: L.CircleMarker | null = null
+let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
 
 function initMap() {
   if (!mapEl.value || map) return
   const [lon, lat] = appStore.coordinate
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 14)
+  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 17)
   basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
-  marker = L.circleMarker([lat, lon], {
-    radius: 6,
-    color: 'var(--accent)',
-    fillColor: 'var(--accent)',
-    fillOpacity: 0.9,
-    weight: 2,
-  }).addTo(map)
+  marker = L.polygon(
+    buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression),
+    { color: '#ffff00', fillOpacity: 0, weight: 2 },
+  ).addTo(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
 }
@@ -162,7 +160,7 @@ watch(() => appStore.theme, () => { basemap?.setUrl(basemapUrl()) })
 watch(
   () => appStore.coordinate,
   ([lon, lat]) => {
-    marker?.setLatLng([lat, lon])
+    marker?.setLatLngs(buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression))
     map?.panTo([lat, lon])
   },
 )
