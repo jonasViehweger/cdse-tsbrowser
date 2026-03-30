@@ -1,0 +1,61 @@
+{
+  "type": "FeatureCollection",
+  "campaign": {
+    "name": "Test Campaign",
+    "startDate": "2020-01-01",
+    "endDate": "2024-01-01",
+    "flagLabels": {
+      "0": "Stable",
+      "1": "Disturbance"
+    },
+    "fields": [
+      {
+        "key": "confidence",
+        "label": "Interpretation Confidence",
+        "type": "select",
+        "options": [
+          "High",
+          "Medium",
+          "Low"
+        ],
+        "required": true,
+        "session_persistent": false
+      },
+      {
+        "key": "interpreter",
+        "label": "Interpreter",
+        "type": "text",
+        "required": true,
+        "session_persistent": true
+      }
+    ]
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -4.122119320177979,
+          36.741785367381176
+        ]
+      },
+      "properties": {
+        "sample_id": 0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -4.121614665341534,
+          36.74231320914648
+        ]
+      },
+      "properties": {
+        "sample_id": 1
+      }
+    }
+  ]
+}
