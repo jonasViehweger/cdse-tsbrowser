@@ -41,6 +41,8 @@ Now an example for a point in "campaign mode" [here](https://label.nadir.earth/?
 
 Written out and nicely formatted, the URL looks like this:
 
+<details><summary>See Full URL</summary>
+
 ```
 https://label.nadir.earth/?lon=17.501370
 &lat=52.084176
@@ -97,6 +99,8 @@ https://label.nadir.earth/?lon=17.501370
     ]
 }
 ```
+
+</details>
 
 Here you can see a few of the additional features a labelling campaign offers:
 
@@ -238,7 +242,7 @@ You can also download the file here: [assets/example_campaign.geojson](assets/ex
 
 ## How to Interpret
 
-![Overview of labelling preset](assets/README_campaign.png)
+![Overview of labelling preset](assets/README_labeling.png)
 
 Switch to the Layout preset `2 - Interpretation Layout`. Then, in the lower right overview map, navigate to
 and click on one of the points which were added in the labelling campaign.
