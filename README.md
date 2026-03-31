@@ -271,7 +271,7 @@ Once happy with the layout, it can be permanently saved using the `Save...` butt
 
 ### Satellite WMS Maps
 
-The Satellite maps are served from a [Sentinel Hub configuration](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/OGC.html) in your own account. On initialization a new configuration called `CDSE TS Browser` is created with some default layers. You can extend this configuration in any way you like and add additional layers. These layers will be dynamically available as options in the settings of the map elements.
+The Satellite maps are served from a [Sentinel Hub configuration](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/OGC.html) in your own account. On initialization a new configuration called `CDSE TS Browser` is created with some default layers. You can extend this configuration in any way you like and add additional layers. These layers will be dynamically available as options in the settings of the map elements. Your configurations can be found [here](https://shapps.dataspace.copernicus.eu/dashboard/#/configurations).
 
 ### Time Series
 
