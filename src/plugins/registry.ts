@@ -59,4 +59,10 @@ export const PANEL_PLUGINS: PanelPlugin[] = [
     singleton: true,
     defaultTitle: 'Labelling Form',
   },
+  {
+    id: 'coordinateInputPanel',
+    name: 'Coordinate Input',
+    singleton: true,
+    defaultTitle: 'Coordinate Input',
+  },
 ]
