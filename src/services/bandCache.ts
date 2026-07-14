@@ -64,12 +64,24 @@ export function fetchBandTimeSeries(
     const results = await Promise.all(
       chunks.map(([s, e]) => fetchRawBands(lon, lat, s, e, collection)),
     )
-    const merged: BandTimeSeries = Object.assign({}, ...results)
-    try {
-      localStorage.setItem(key, JSON.stringify(merged))
-    } catch {
-      // Ignore storage quota errors — cache is best-effort
+    const merged: BandTimeSeries = Object.assign({}, ...results.map(r => r.series))
+    const unresolved = results.flatMap(r => r.unresolved)
+
+    if (unresolved.length) {
+      // These dates are unknown, not empty. Caching the range now would freeze
+      // the gaps in permanently, so leave it uncached and let the next load retry.
+      console.warn(
+        `Statistical API: ${unresolved.length} interval(s) failed and could not be recovered; ` +
+          `not caching this range. ${unresolved.map(f => `${f.date} (${f.type})`).join(', ')}`,
+      )
+    } else {
+      try {
+        localStorage.setItem(key, JSON.stringify(merged))
+      } catch {
+        // Ignore storage quota errors — cache is best-effort
+      }
     }
+
     inFlight.delete(key)
     return merged
   })()

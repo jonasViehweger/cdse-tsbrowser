@@ -39,19 +39,57 @@ function evaluatePixel(s) {
 }`
 
 
+export type BandStatsOutputs = Record<
+  string,
+  { bands: { B0: { stats: { mean: number; sampleCount: number; noDataCount: number } } } }
+>
+
 export interface BandStatsEntry {
   interval: { from: string; to: string }
-  outputs: Record<string, { bands: { B0: { stats: { mean: number; sampleCount: number; noDataCount: number } } } }>
+  /** Present only when the interval was computed successfully. */
+  outputs?: BandStatsOutputs
+  /** Present *instead of* `outputs` when the interval failed. */
+  error?: { type?: string; message?: string }
 }
 
 export interface RawBandsResponse {
   data: BandStatsEntry[]
+  status?: string
 }
 
-export function parseRawBandsResponse(json: RawBandsResponse): BandTimeSeries {
-  const result: BandTimeSeries = {}
+/**
+ * Interval error types Sentinel Hub considers transient. Same list the official
+ * Python SDK retries on, and it recovers them the same way we do below: by
+ * re-requesting the interval on its own.
+ */
+const RETRIABLE_ERRORS = new Set(['EXECUTION_ERROR', 'TIMEOUT'])
+
+export interface FailedInterval {
+  date: string
+  type: string
+  retriable: boolean
+}
+
+export interface ParsedRawBands {
+  series: BandTimeSeries
+  failed: FailedInterval[]
+}
+
+export function parseRawBandsResponse(json: RawBandsResponse): ParsedRawBands {
+  const series: BandTimeSeries = {}
+  const failed: FailedInterval[] = []
+
   for (const entry of json.data) {
     const date = entry.interval.from.slice(0, 10)
+
+    // A failed interval carries `error` in place of `outputs`. The request as a
+    // whole still comes back 200, so this is the only place the failure surfaces.
+    if (!entry.outputs) {
+      const type = entry.error?.type ?? 'UNKNOWN'
+      failed.push({ date, type, retriable: RETRIABLE_ERRORS.has(type) })
+      continue
+    }
+
     const bands = {} as RawBands
     for (const band of BAND_NAMES) {
       const mean = entry.outputs[band]?.bands?.B0?.stats?.mean
@@ -59,14 +97,26 @@ export function parseRawBandsResponse(json: RawBandsResponse): BandTimeSeries {
     }
     // Only store dates that have at least some valid data
     if (BAND_NAMES.some(b => bands[b] !== null)) {
-      result[date] = bands
+      series[date] = bands
     }
   }
-  return result
+
+  return { series, failed }
+}
+
+export interface RawBandsResult {
+  series: BandTimeSeries
+  /**
+   * Intervals still missing after retries. A gap here is "we don't know", not
+   * "no data" — callers must not persist it as if the range were complete.
+   */
+  unresolved: FailedInterval[]
 }
 
 /**
- * Fetch raw Sentinel-2 band means for a single date range.
+ * Fetch raw Sentinel-2 band means for a single date range, recovering any
+ * intervals that failed transiently.
+ *
  * Chunking and caching are handled by bandCache.ts.
  */
 export async function fetchRawBands(
@@ -75,7 +125,39 @@ export async function fetchRawBands(
   startDate: string,
   endDate: string,
   collection: string,
-): Promise<BandTimeSeries> {
+): Promise<RawBandsResult> {
+  const first = await requestRawBands(lon, lat, startDate, endDate, collection)
+
+  const retriable = first.failed.filter(f => f.retriable)
+  const unresolved = first.failed.filter(f => !f.retriable)
+
+  if (!retriable.length) return { series: first.series, unresolved }
+
+  // Re-request each transiently failed day on its own; a whole-range request
+  // that trips one interval usually succeeds when that interval stands alone.
+  const retries = await Promise.all(
+    retriable.map(async (f): Promise<ParsedRawBands> => {
+      try {
+        return await requestRawBands(lon, lat, f.date, f.date, collection)
+      } catch {
+        return { series: {}, failed: [f] }
+      }
+    }),
+  )
+
+  return {
+    series: Object.assign({}, first.series, ...retries.map(r => r.series)),
+    unresolved: unresolved.concat(...retries.map(r => r.failed)),
+  }
+}
+
+async function requestRawBands(
+  lon: number,
+  lat: number,
+  startDate: string,
+  endDate: string,
+  collection: string,
+): Promise<ParsedRawBands> {
   const token = await getValidToken()
   const geometry = buildPixelPolygon(lon, lat)
   const evalscript = EVALSCRIPT_RAW
