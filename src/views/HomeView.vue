@@ -61,11 +61,24 @@
         </div>
       </section>
 
-      <!-- Coordinate readout -->
+      <!-- Coordinate: type it, or click the map -->
       <section class="card coord-card">
         <div class="card-title">Location</div>
-        <p v-if="picked" class="coord-text">{{ picked[1].toFixed(5) }}° N, {{ picked[0].toFixed(5) }}° E</p>
-        <p v-else class="hint">Click on the map to choose a location.</p>
+        <div class="coord-row">
+          <input
+            v-model="coordInput"
+            type="text"
+            class="coord-input"
+            :class="{ 'input-error': coordError }"
+            placeholder="lat, lon  e.g. 47.3456, 15.0439"
+            inputmode="decimal"
+            @keydown.enter="applyCoord"
+            @input="coordError = ''"
+          />
+          <button class="btn btn-ghost btn-go" :disabled="!coordInput.trim()" @click="applyCoord">Go</button>
+        </div>
+        <p v-if="coordError" class="coord-error">{{ coordError }}</p>
+        <p v-else-if="!picked" class="hint">Click on the map, or type a coordinate above.</p>
       </section>
 
       <button class="btn btn-accent btn-full btn-open" :disabled="!picked" @click="open">
@@ -87,6 +100,7 @@ import { useAuthStore } from '../stores/auth'
 import { fetchToken } from '../services/auth'
 import { serialiseUrl } from '../utils/url'
 import { basemapUrl } from '../utils/basemap'
+import { parseLatLon, formatLatLon } from '../utils/coordinate'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -128,9 +142,50 @@ const endDate   = ref(appStore.endDate)
 // ── Map ─────────────────────────────────────────────────────────────────────
 const mapEl = ref<HTMLDivElement | null>(null)
 const picked = ref<[number, number] | null>(null)
+const coordInput = ref('')
+const coordError = ref('')
+
+/** Zoom to settle on when a coordinate is typed rather than clicked. */
+const TYPED_ZOOM = 13
 
 let map: L.Map | null = null
 let marker: L.CircleMarker | null = null
+
+/** Single place a coordinate becomes the selection, whoever chose it. */
+function setPicked(lon: number, lat: number, recentre: boolean) {
+  picked.value = [lon, lat]
+  coordInput.value = formatLatLon(lon, lat)
+  coordError.value = ''
+
+  if (!map) return
+  if (marker) {
+    marker.setLatLng([lat, lon])
+  } else {
+    marker = L.circleMarker([lat, lon], {
+      radius: 7,
+      color: 'var(--accent)',
+      fillColor: 'var(--accent)',
+      fillOpacity: 0.9,
+      weight: 2,
+    }).addTo(map)
+  }
+
+  // Typing a far-away coordinate should bring the map to it; clicking should
+  // not yank the view out from under the click.
+  if (recentre) map.setView([lat, lon], Math.max(map.getZoom(), TYPED_ZOOM))
+}
+
+function applyCoord() {
+  if (!coordInput.value.trim()) return
+
+  const parsed = parseLatLon(coordInput.value)
+  if (!parsed.ok) {
+    coordError.value = parsed.error
+    return
+  }
+
+  setPicked(parsed.value.lon, parsed.value.lat, true)
+}
 
 onMounted(() => {
   if (!mapEl.value) return
@@ -139,19 +194,7 @@ onMounted(() => {
 
   map.on('click', (e: L.LeafletMouseEvent) => {
     const { lng: lon, lat } = e.latlng.wrap()
-    picked.value = [lon, lat]
-    if (!map) return
-    if (marker) {
-      marker.setLatLng([lat, lon])
-    } else {
-      marker = L.circleMarker([lat, lon], {
-        radius: 7,
-        color: 'var(--accent)',
-        fillColor: 'var(--accent)',
-        fillOpacity: 0.9,
-        weight: 2,
-      }).addTo(map)
-    }
+    setPicked(lon, lat, false)
   })
 })
 
@@ -164,6 +207,13 @@ onUnmounted(() => { map?.remove(); map = null })
 // ── Navigate ─────────────────────────────────────────────────────────────────
 function open() {
   if (!picked.value) return
+
+  // Text edited after the pin was placed — honour what is in the box.
+  if (coordInput.value.trim() !== formatLatLon(picked.value[0], picked.value[1])) {
+    applyCoord()
+    if (coordError.value) return
+  }
+
   const [lon, lat] = picked.value
   const qs = serialiseUrl({ lon, lat, start: startDate.value, end: endDate.value, selected: null })
   window.location.href = qs
@@ -189,6 +239,12 @@ function open() {
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+}
+
+/* Without this the cards and the Open button compress to fit a short viewport
+   instead of overflowing, so the sidebar never scrolls and the button vanishes. */
+.sidebar > * {
+  flex-shrink: 0;
 }
 
 .brand {
@@ -275,7 +331,8 @@ function open() {
   color: var(--text-sub);
 }
 
-.field input {
+.field input,
+.coord-input {
   background: var(--bg-input);
   border: 1px solid var(--border-mid);
   border-radius: 4px;
@@ -288,9 +345,11 @@ function open() {
   color-scheme: dark;
 }
 
-.field input:focus { border-color: var(--accent); }
+.field input:focus,
+.coord-input:focus { border-color: var(--accent); }
 
-[data-theme="light"] .field input { color-scheme: light; }
+[data-theme="light"] .field input,
+[data-theme="light"] .coord-input { color-scheme: light; }
 
 .check-label {
   display: flex;
@@ -320,11 +379,30 @@ function open() {
 /* ── Coord card ── */
 .coord-card { min-height: 60px; }
 
-.coord-text {
-  margin: 0;
-  font-size: 0.9rem;
+.coord-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.coord-input {
+  flex: 1;
+  min-width: 0;
   font-family: monospace;
   color: var(--accent);
+}
+
+.coord-input.input-error { border-color: var(--red); }
+
+.btn-go {
+  flex-shrink: 0;
+  padding: 9px 14px;
+}
+
+.coord-error {
+  margin: 6px 0 0;
+  color: var(--red);
+  font-size: 0.78rem;
 }
 
 /* ── Buttons ── */
@@ -362,5 +440,32 @@ function open() {
 .map {
   height: 100%;
   cursor: crosshair;
+}
+
+/* ── Narrow screens ──
+   Stack map over sidebar. The app shell sets `overflow: hidden` on html/body,
+   so the page itself cannot scroll — .home has to be the scroll container. */
+@media (max-width: 860px) {
+  .home {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  /* Map first: picking a location is the point of this page. */
+  .map {
+    order: -1;
+    height: 45vh;
+    min-height: 240px;
+  }
+
+  .sidebar {
+    /* .home scrolls now; a nested scroller here would trap the content. */
+    overflow-y: visible;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    padding: 16px;
+  }
 }
 </style>

@@ -57,7 +57,7 @@
     <!-- Add Panel dropdown -->
     <div class="add-panel-wrapper" ref="dropdownRef">
       <button class="add-btn" @click="toggleDropdown">+ Add Panel</button>
-      <div v-if="dropdownOpen" class="add-dropdown">
+      <div v-if="dropdownOpen" class="add-dropdown" :style="dropdownStyle">
         <button
           v-for="plugin in PANEL_PLUGINS"
           :key="plugin.id"
@@ -149,14 +149,44 @@ watch(() => campaignStore.schema?.name, refreshCampaignNames)
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const dropdownStyle = ref({ top: '0px', left: '0px' })
 
 const saving = ref(false)
 const saveName = ref('')
 const saveInputRef = ref<HTMLInputElement | null>(null)
 
+/** Matches the min-width of .add-dropdown. */
+const DROPDOWN_WIDTH = 180
+const VIEWPORT_MARGIN = 8
+
+/** Anchor the fixed-position menu under its button, kept inside the viewport. */
+function positionDropdown() {
+  const rect = dropdownRef.value?.getBoundingClientRect()
+  if (!rect) return
+
+  const maxLeft = window.innerWidth - DROPDOWN_WIDTH - VIEWPORT_MARGIN
+  dropdownStyle.value = {
+    top: `${rect.bottom + 4}px`,
+    left: `${Math.max(VIEWPORT_MARGIN, Math.min(rect.left, maxLeft))}px`,
+  }
+}
+
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value) positionDropdown()
 }
+
+// The button moves when the toolbar is scrolled or the window resized, and a
+// fixed menu does not follow it — so re-anchor it while it is open.
+watch(dropdownOpen, (open) => {
+  if (open) {
+    window.addEventListener('scroll', positionDropdown, true)
+    window.addEventListener('resize', positionDropdown)
+  } else {
+    window.removeEventListener('scroll', positionDropdown, true)
+    window.removeEventListener('resize', positionDropdown)
+  }
+})
 
 function isDisabled(plugin: PanelPlugin): boolean {
   if (!plugin.singleton) return false
@@ -212,7 +242,11 @@ onMounted(() => {
   document.addEventListener('click', onDocumentClick, true)
   refreshCampaignNames()
 })
-onUnmounted(() => document.removeEventListener('click', onDocumentClick, true))
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick, true)
+  window.removeEventListener('scroll', positionDropdown, true)
+  window.removeEventListener('resize', positionDropdown)
+})
 
 const authClass = computed(() => {
   if (!authStore.clientId) return 'auth-grey'
@@ -237,6 +271,16 @@ const authTitle = computed(() => {
   flex-shrink: 0;
   color: var(--text);
   font-size: 0.82rem;
+  /* Scroll the bar sideways rather than letting its controls squash together
+     when the window is too narrow to hold them all. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+/* Each control group keeps its natural width; the bar scrolls instead. */
+.toolbar > * {
+  flex-shrink: 0;
 }
 
 .toolbar-logo {
@@ -357,10 +401,11 @@ const authTitle = computed(() => {
   background: var(--bg-hover);
 }
 
+/* Fixed, not absolute: the toolbar is now a scroll container, and an absolutely
+   positioned child would be clipped inside its 40px height. Coordinates come
+   from positionDropdown(). */
 .add-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   background: var(--bg);
   border: 1px solid var(--border-mid);
   border-radius: 4px;
