@@ -1,7 +1,9 @@
 <template>
   <header class="toolbar">
-    <img src="/favicon.svg" alt="" class="toolbar-logo" />
-    <span class="toolbar-title">CDSE TS Browser</span>
+    <a class="toolbar-home" :href="homeUrl" title="Back to the start page">
+      <img src="/favicon.svg" alt="" class="toolbar-logo" />
+      <span class="toolbar-title">CDSE TS Browser</span>
+    </a>
 
     <!-- Layout preset selector + save/delete -->
     <div class="layout-controls">
@@ -147,6 +149,10 @@ async function onCampaignChange(e: Event) {
 
 watch(() => campaignStore.schema?.name, refreshCampaignNames)
 
+// The start page is the app with no coordinate in the query string, and App.vue
+// reads that once at setup — so this has to be a real navigation, not a route swap.
+const homeUrl = import.meta.env.BASE_URL
+
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const dropdownStyle = ref({ top: '0px', left: '0px' })
@@ -281,6 +287,24 @@ const authTitle = computed(() => {
 /* Each control group keeps its natural width; the bar scrolls instead. */
 .toolbar > * {
   flex-shrink: 0;
+}
+
+.toolbar-home {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  border-radius: 4px;
+  transition: opacity 0.1s;
+}
+
+.toolbar-home:hover {
+  opacity: 0.75;
+}
+
+.toolbar-home:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .toolbar-logo {
