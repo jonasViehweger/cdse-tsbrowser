@@ -1,13 +1,8 @@
 <template>
   <div class="wayback-panel">
     <div class="wayback-toolbar">
-      <span v-if="phase === 'loading-layers'" class="status-text">Detecting releases…</span>
-      <span v-else-if="phase === 'loading-dates'" class="status-text">Loading acquisition dates…</span>
-      <span v-else-if="phase === 'error'" class="status-error" :title="errorDetail">Failed to load</span>
-      <span v-else-if="releases.length" class="status-text">
-        {{ releases.length }} releases
-      </span>
-      <span v-else class="status-text">No releases at this location</span>
+      <span v-if="phase === 'error'" class="status-error" :title="errorDetail">Failed to load</span>
+      <span v-else class="status-text">{{ statusText }}</span>
     </div>
 
     <div class="wayback-body">
@@ -18,9 +13,9 @@
           :key="r.layerNumber"
           class="release-item"
           :class="{ selected: selectedLayerNumber === r.layerNumber }"
-          @click="selectRelease(r.layerNumber)"
+          @click="pickRelease(r.layerNumber)"
         >
-          <div class="release-acq">{{ r.acquisitionDate ?? '…' }}</div>
+          <div class="release-acq">{{ r.acquisitionDate }}</div>
           <div class="release-pub">pub {{ r.publishDate }}</div>
         </div>
       </div>
@@ -32,13 +27,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import {
-  getReleasesAtPoint,
-  getAcquisitionDate,
+  loadReleasesWithDates,
   waybackTileUrl,
   type WaybackRelease,
 } from '../../services/waybackApi'
@@ -52,10 +46,23 @@ const props = defineProps<{
 const appStore = useAppStore()
 
 const mapEl = ref<HTMLDivElement | null>(null)
+/** Only releases whose date has arrived, deduplicated, newest acquisition first. */
 const releases = ref<WaybackRelease[]>([])
+/** Releases the walk has found whose date is still in flight. */
+const checking = ref(0)
 const selectedLayerNumber = ref<number | null>(null)
-const phase = ref<'idle' | 'loading-layers' | 'loading-dates' | 'ready' | 'error'>('idle')
+const phase = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorDetail = ref('')
+
+const statusText = computed(() => {
+  const found = releases.value.length
+  if (phase.value === 'loading') {
+    if (!found && !checking.value) return 'Detecting releases…'
+    return `${found} release${found === 1 ? '' : 's'} · checking ${checking.value}…`
+  }
+  if (!found) return 'No releases at this location'
+  return `${found} release${found === 1 ? '' : 's'}`
+})
 
 let map: L.Map | null = null
 let basemap: L.TileLayer | null = null
@@ -97,54 +104,91 @@ function selectRelease(layerNumber: number) {
   props.params?.api?.updateParameters({ selectedLayerNumber: layerNumber })
 }
 
-async function loadReleases() {
-  const [lon, lat] = appStore.coordinate
-  phase.value = 'loading-layers'
-  releases.value = []
-  selectedLayerNumber.value = null
-  errorDetail.value = ''
+/** A click, as opposed to an auto-selection — pins the choice across the reorder. */
+function pickRelease(layerNumber: number) {
+  userPicked = true
+  selectRelease(layerNumber)
+}
 
-  try {
-    const layers = await getReleasesAtPoint(lat, lon)
+/** Newest acquisition first, unknown dates last. */
+function byAcquisition(a: WaybackRelease, b: WaybackRelease): number {
+  if (a.acquisitionDate === 'unknown') return b.acquisitionDate === 'unknown' ? 0 : 1
+  if (b.acquisitionDate === 'unknown') return -1
+  return b.acquisitionDate.localeCompare(a.acquisitionDate)
+}
 
-    if (!layers.length) {
-      phase.value = 'ready'
+// Discards results from a load the coordinate has already moved on from.
+let loadToken = 0
+let userPicked = false
+/** Position of each release in the walk — index 0 is the most recently published. */
+let walkIndex = new Map<number, number>()
+
+/**
+ * Place a resolved release in the list, dropping it if another release already
+ * covers the same acquisition date.
+ *
+ * Dates arrive in whatever order the metadata service answers, so "keep the most
+ * recently published of a duplicate pair" has to be decided on walk position
+ * rather than on arrival order.
+ */
+function insertRelease(release: WaybackRelease) {
+  const rank = walkIndex.get(release.layerNumber) ?? Infinity
+
+  if (release.acquisitionDate !== 'unknown') {
+    const clash = releases.value.find((r) => r.acquisitionDate === release.acquisitionDate)
+    if (clash) {
+      if (rank < (walkIndex.get(clash.layerNumber) ?? Infinity)) Object.assign(clash, release)
       return
     }
+  }
 
-    // Fetch all acquisition dates concurrently before showing the list
-    phase.value = 'loading-dates'
-    const enriched: WaybackRelease[] = await Promise.all(
-      layers.map(async (layer) => {
-        const acquisitionDate = await getAcquisitionDate(lat, lon, layer.identifier)
-        return { ...layer, acquisitionDate }
-      }),
-    )
+  const at = releases.value.findIndex((r) => byAcquisition(release, r) < 0)
+  if (at === -1) releases.value.push(release)
+  else releases.value.splice(at, 0, release)
+}
 
-    // Deduplicate: for the same acquisition date keep only the most recently
-    // published release (layers are already sorted newest-publish-first from
-    // getReleasesAtPoint, so the first occurrence wins).
-    const seen = new Set<string>()
-    const deduped = enriched.filter((r) => {
-      if (!r.acquisitionDate || r.acquisitionDate === 'unknown') return true
-      if (seen.has(r.acquisitionDate)) return false
-      seen.add(r.acquisitionDate)
-      return true
+async function loadReleases() {
+  const token = ++loadToken
+  const [lon, lat] = appStore.coordinate
+
+  phase.value = 'loading'
+  releases.value = []
+  checking.value = 0
+  selectedLayerNumber.value = null
+  errorDetail.value = ''
+  userPicked = false
+  walkIndex = new Map()
+
+  try {
+    await loadReleasesWithDates(lat, lon, {
+      onFound(layer) {
+        if (token !== loadToken) return
+        walkIndex.set(layer.layerNumber, walkIndex.size)
+        checking.value++
+
+        // Show imagery from the newest release straight away rather than waiting
+        // on its date. Being walk index 0 it always wins any dedup tie, so it
+        // cannot later be dropped from the list under the selection.
+        if (selectedLayerNumber.value === null) selectRelease(layer.layerNumber)
+      },
+      onResolved(release) {
+        if (token !== loadToken) return
+        checking.value--
+        insertRelease(release)
+      },
     })
 
-    // Sort by acquisition date descending; unknown dates go to the end
-    deduped.sort((a, b) => {
-      if (!a.acquisitionDate || a.acquisitionDate === 'unknown') return 1
-      if (!b.acquisitionDate || b.acquisitionDate === 'unknown') return -1
-      return b.acquisitionDate.localeCompare(a.acquisitionDate)
-    })
+    if (token !== loadToken) return
 
-    releases.value = deduped
-
-    // Auto-select the most recent release
-    selectRelease(deduped[0].layerNumber)
     phase.value = 'ready'
+    if (!releases.value.length) return
+
+    // The eagerly selected release is the newest-published one, which need not be
+    // the newest *acquisition* — that is what the list is sorted by, and what
+    // should end up selected unless the user has already chosen otherwise.
+    if (!userPicked) selectRelease(releases.value[0].layerNumber)
   } catch (e) {
+    if (token !== loadToken) return
     phase.value = 'error'
     errorDetail.value = e instanceof Error ? e.message : String(e)
   }
