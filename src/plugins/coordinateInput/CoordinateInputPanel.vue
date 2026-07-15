@@ -31,6 +31,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '../../stores/app'
+import { parseLatLon, formatLatLon } from '../../utils/coordinate'
 
 const appStore = useAppStore()
 
@@ -40,36 +41,19 @@ const inputRef = ref<HTMLInputElement | null>(null)
 
 const currentDisplay = computed(() => {
   const [lon, lat] = appStore.coordinate
-  return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
+  return formatLatLon(lon, lat)
 })
 
 function apply() {
-  const raw = inputValue.value.trim()
-  if (!raw) return
+  if (!inputValue.value.trim()) return
 
-  const parts = raw.split(',')
-  if (parts.length !== 2) {
-    parseError.value = 'Expected exactly two values separated by a comma.'
+  const parsed = parseLatLon(inputValue.value)
+  if (!parsed.ok) {
+    parseError.value = parsed.error
     return
   }
 
-  const lat = parseFloat(parts[0].trim())
-  const lon = parseFloat(parts[1].trim())
-
-  if (isNaN(lat) || isNaN(lon)) {
-    parseError.value = 'Could not parse numbers — check your input.'
-    return
-  }
-  if (lat < -90 || lat > 90) {
-    parseError.value = 'Latitude must be between −90 and 90.'
-    return
-  }
-  if (lon < -180 || lon > 180) {
-    parseError.value = 'Longitude must be between −180 and 180.'
-    return
-  }
-
-  appStore.setCoordinate(lon, lat)
+  appStore.setCoordinate(parsed.value.lon, parsed.value.lat)
   inputValue.value = ''
   parseError.value = ''
   inputRef.value?.blur()
