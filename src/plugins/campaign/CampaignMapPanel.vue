@@ -122,6 +122,12 @@ watch(
   () => buildMarkers(),
 )
 
+// Follow the active coordinate, whatever changed it (campaign next, marker click,
+// coordinate input panel, toolbar).
+watch(() => appStore.coordinate, ([lon, lat]) => {
+  map?.panTo([lat, lon])
+})
+
 // Swap basemap when theme changes
 watch(() => appStore.theme, () => { basemap?.setUrl(basemapUrl()) })
 
