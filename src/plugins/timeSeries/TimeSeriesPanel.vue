@@ -13,6 +13,7 @@
         :flags="flags"
         :flag-labels="flagLabels"
         :selected-date="appStore.selectedDate"
+        :y-mode="yMode"
         :y-min="yMin"
         :y-max="yMax"
         :unit="dataSource?.unit ?? ''"
@@ -38,6 +39,39 @@
         <span class="field-label">Cloud mask</span>
         <input v-model="pendingMaskClouds" type="checkbox" />
       </label>
+
+      <label class="field-row">
+        <span class="field-label">Y-axis</span>
+        <select v-model="pendingYMode" class="field-select">
+          <option v-for="m in Y_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+        </select>
+      </label>
+
+      <div v-if="pendingYMode === 'manual'" class="field-row">
+        <span class="field-label">Range</span>
+        <input
+          v-model="pendingYMin"
+          type="number"
+          step="any"
+          placeholder="min"
+          class="field-input"
+        />
+        <input
+          v-model="pendingYMax"
+          type="number"
+          step="any"
+          placeholder="max"
+          class="field-input"
+        />
+      </div>
+
+      <p v-if="manualRangeInvalid" class="field-hint">
+        Enter a min below the max, or the axis will fall back to auto.
+      </p>
+      <p v-else-if="pendingYMode === 'robust'" class="field-hint">
+        Ignores outliers (e.g. missed cloud/snow) when fitting the axis. Off-scale
+        acquisitions are marked with a triangle at the plot edge.
+      </p>
     </PanelSettingsModal>
   </div>
 </template>
@@ -48,13 +82,20 @@ import { useAppStore } from '../../stores/app'
 import { useLayoutStore } from '../../stores/layout'
 import { usePanelSettingsStore } from '../../stores/panelSettings'
 import { useTimeSeries } from '../../composables/useTimeSeries'
-import { useTimeSeriesConfig } from './useTimeSeriesConfig'
+import { useTimeSeriesConfig, Y_MODES, type YMode } from './useTimeSeriesConfig'
+import { computeRobustRange } from '../../utils/chartData'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 
 // dockview-vue passes a single `params` prop containing both the user-defined
 // params (under params.params) and the panel API (under params.api).
-type UserParams = { dataSourceId?: string; maskClouds?: boolean }
+type UserParams = {
+  dataSourceId?: string
+  maskClouds?: boolean
+  yMode?: YMode
+  yMin?: number | null
+  yMax?: number | null
+}
 type PanelApi = {
   id: string
   updateParameters(p: Record<string, unknown>): void
@@ -72,10 +113,11 @@ const appStore = useAppStore()
 const layoutStore = useLayoutStore()
 const settingsStore = usePanelSettingsStore()
 
-const { dataSourceId, maskClouds, yMin, yMax, dataSource, allDataSources } =
+const { dataSourceId, maskClouds, yMode, yMin, yMax, dataSource, allDataSources } =
   useTimeSeriesConfig({
     dataSourceId: userParams()?.dataSourceId,
     maskClouds: userParams()?.maskClouds,
+    yMode: userParams()?.yMode,
     yMin: userParams()?.yMin ?? null,
     yMax: userParams()?.yMax ?? null,
   })
@@ -85,16 +127,42 @@ const { dataSourceId, maskClouds, yMin, yMax, dataSource, allDataSources } =
 const showSettings = ref(false)
 const pendingDataSourceId = ref(dataSourceId.value)
 const pendingMaskClouds = ref(maskClouds.value)
+const pendingYMode = ref<YMode>(yMode.value)
+// Kept as strings: <input type="number"> yields '' when cleared, which must
+// stay distinguishable from a genuine 0.
+const pendingYMin = ref(yMin.value?.toString() ?? '')
+const pendingYMax = ref(yMax.value?.toString() ?? '')
+
+function parseBound(s: string): number | null {
+  const trimmed = s.trim()
+  if (trimmed === '') return null
+  const n = Number(trimmed)
+  return Number.isFinite(n) ? n : null
+}
+
+const manualRangeInvalid = computed(() => {
+  if (pendingYMode.value !== 'manual') return false
+  const lo = parseBound(pendingYMin.value)
+  const hi = parseBound(pendingYMax.value)
+  if (lo == null || hi == null) return true
+  return lo >= hi
+})
 
 function openSettings() {
   pendingDataSourceId.value = dataSourceId.value
   pendingMaskClouds.value = maskClouds.value
+  pendingYMode.value = yMode.value
+  pendingYMin.value = yMin.value?.toString() ?? ''
+  pendingYMax.value = yMax.value?.toString() ?? ''
   showSettings.value = true
 }
 
 function applySettings() {
   dataSourceId.value = pendingDataSourceId.value
   maskClouds.value = pendingMaskClouds.value
+  yMode.value = pendingYMode.value
+  yMin.value = parseBound(pendingYMin.value)
+  yMax.value = parseBound(pendingYMax.value)
   panelApi()?.setTitle(dataSource.value?.name ?? 'Time Series')
   showSettings.value = false
 }
@@ -116,10 +184,13 @@ onUnmounted(() => {
 
 // Keep dockview params in sync so toJSON() captures current settings,
 // then explicitly save — updateParameters() does not fire onDidLayoutChange.
-watch([dataSourceId, maskClouds], () => {
+watch([dataSourceId, maskClouds, yMode, yMin, yMax], () => {
   panelApi()?.updateParameters({
     dataSourceId: dataSourceId.value,
     maskClouds: maskClouds.value,
+    yMode: yMode.value,
+    yMin: yMin.value,
+    yMax: yMax.value,
   })
   layoutStore.saveLayout()
 })
@@ -132,6 +203,11 @@ watch(() => props.params?.params, (p) => {
     dataSourceId.value = p.dataSourceId
   if (p.maskClouds != null && p.maskClouds !== maskClouds.value)
     maskClouds.value = p.maskClouds
+  if (p.yMode != null && p.yMode !== yMode.value) yMode.value = p.yMode
+  // yMin/yMax are legitimately null in non-manual modes, so compare directly
+  // rather than null-guarding — otherwise a cleared bound never restores.
+  if (p.yMin !== undefined && p.yMin !== yMin.value) yMin.value = p.yMin
+  if (p.yMax !== undefined && p.yMax !== yMax.value) yMax.value = p.yMax
   nextTick(() => panelApi()?.setTitle(dataSource.value?.name ?? 'Time Series'))
 })
 
@@ -142,6 +218,17 @@ onMounted(() => {
 // ── Data & display ──────────────────────────────────────────────────────────
 
 const { data, loading, error } = useTimeSeries(dataSource, maskClouds)
+
+// Switching to manual with empty fields: seed them from the range the user is
+// currently looking at, so they adjust rather than guess from scratch.
+watch(pendingYMode, (mode) => {
+  if (mode !== 'manual') return
+  if (pendingYMin.value !== '' || pendingYMax.value !== '') return
+  const seed = computeRobustRange(data.value)
+  if (!seed) return
+  pendingYMin.value = seed[0].toPrecision(3)
+  pendingYMax.value = seed[1].toPrecision(3)
+})
 
 watch(data, (pts) => appStore.setChartDates(pts.filter(p => p.value !== null).map(p => p.date)), { immediate: true })
 
@@ -239,6 +326,13 @@ function onPointClick(date: string) {
 .toggle-row {
   cursor: pointer;
   user-select: none;
+}
+
+.field-hint {
+  margin: -8px 0 0 102px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--text-muted);
 }
 
 </style>
