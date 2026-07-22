@@ -309,6 +309,9 @@ function onPointClick(date: string) {
 .field-select,
 .field-input {
   flex: 1;
+  /* Override min-width:auto so flex items can shrink past the input's
+     intrinsic size — otherwise the paired min/max inputs overflow the modal. */
+  min-width: 0;
   background: var(--bg-input);
   border: 1px solid var(--border-mid);
   border-radius: 4px;
