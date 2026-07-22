@@ -3,12 +3,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { TimeSeriesPoint } from '../../types/api'
 import type { Flags, FlagLabels } from '../../types/state'
-import { buildUplotData } from '../../utils/chartData'
+import type { YMode } from './useTimeSeriesConfig'
+import { buildUplotData, computeRobustRange } from '../../utils/chartData'
 import { flagColour as sharedFlagColour } from '../../utils/flagColour'
 import { useAppStore } from '../../stores/app'
 
@@ -23,10 +24,25 @@ const props = defineProps<{
   flags: Flags
   flagLabels: FlagLabels
   selectedDate: string | null
+  yMode: YMode
   yMin: number | null
   yMax: number | null
   unit: string
 }>()
+
+/**
+ * The range to pin the y-scale to, or null to let uPlot autoscale.
+ * Manual mode needs both bounds; a half-filled pair falls back to autoscale
+ * rather than inventing the missing side.
+ */
+const fixedYRange = computed<[number, number] | null>(() => {
+  if (props.yMode === 'manual') {
+    if (props.yMin == null || props.yMax == null || props.yMin >= props.yMax) return null
+    return [props.yMin, props.yMax]
+  }
+  if (props.yMode === 'robust') return computeRobustRange(props.data)
+  return null
+})
 
 const emit = defineEmits<{
   pointClick: [date: string]
@@ -47,9 +63,50 @@ function getSize(): { width: number; height: number } {
   return { width: el.clientWidth || 300, height: el.clientHeight || 200 }
 }
 
+/**
+ * Mark acquisitions whose value falls outside the visible y-range with a small
+ * triangle pinned to the edge they ran off. Without this, robust/manual scaling
+ * silently hides the very points the user most likely wants to inspect — they
+ * remain clickable, since hit-testing is on x distance alone.
+ */
+function drawOffScaleMarkers(u: uPlot) {
+  const yMinVis = u.scales.y.min
+  const yMaxVis = u.scales.y.max
+  if (yMinVis == null || yMaxVis == null) return
+
+  const xs = u.data[0]
+  const ys = u.data[1] as (number | null)[]
+  const ctx = u.ctx
+  const size = 5
+
+  ctx.fillStyle = cssVar('--text-muted')
+  for (let i = 0; i < xs.length; i++) {
+    const y = ys[i]
+    if (y == null) continue
+    const below = y < yMinVis
+    if (!below && y <= yMaxVis) continue
+
+    const cx = Math.round(u.valToPos(xs[i], 'x', true))
+    if (cx < u.bbox.left || cx > u.bbox.left + u.bbox.width) continue
+
+    // Apex points towards where the value actually lies, kept inside the plot
+    // area so the triangle never overdraws the axis margin.
+    const apex = below ? u.bbox.top + u.bbox.height - 1 : u.bbox.top + 1
+    const base = below ? apex - size : apex + size
+    ctx.beginPath()
+    ctx.moveTo(cx, apex)
+    ctx.lineTo(cx - size, base)
+    ctx.lineTo(cx + size, base)
+    ctx.closePath()
+    ctx.fill()
+  }
+}
+
 function drawAnnotations(u: uPlot) {
   const ctx = u.ctx
   ctx.save()
+
+  drawOffScaleMarkers(u)
 
   // Draw flag markers
   const flagEntries = Object.entries(props.flags)
@@ -105,9 +162,13 @@ function createChart() {
     scales: {
       x: { time: true },
       y: {
-        range: props.yMin != null && props.yMax != null
-          ? [props.yMin, props.yMax]
-          : undefined,
+        // Callback rather than a static range so a re-scale re-reads the
+        // current mode — robust ranges shift whenever the data reloads.
+        range: (_u, dataMin, dataMax) => {
+          const fixed = fixedYRange.value
+          if (fixed) return fixed
+          return uPlot.rangeNum(dataMin, dataMax, 0.1, true)
+        },
       },
     },
     axes: [
@@ -209,9 +270,20 @@ watch(
   { deep: true },
 )
 
-// Recreate chart when y-limits, unit, or theme change
+// Re-run the y-scale range callback when the mode or manual bounds change.
+// Cheaper than a rebuild, which would otherwise fire on every data reload
+// because the robust range shifts with the data.
 watch(
-  [() => props.yMin, () => props.yMax, () => props.unit, () => appStore.theme],
+  [() => props.yMode, () => props.yMin, () => props.yMax],
+  () => {
+    uplot?.setData(buildUplotData(props.data))
+  },
+)
+
+// Recreate chart when unit or theme change — axis labels and colours are
+// baked into the options at construction time.
+watch(
+  [() => props.unit, () => appStore.theme],
   () => {
     destroyChart()
     createChart()
