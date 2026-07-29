@@ -47,6 +47,7 @@ function generateMockBandData(startDate: string, endDate: string): BandTimeSerie
 export function useTimeSeries(
   dataSource: Ref<DataSource | undefined>,
   maskClouds: Ref<boolean>,
+  validSclClasses: Ref<number[]>,
 ): UseTimeSeriesReturn {
   const appStore = useAppStore()
   const authStore = useAuthStore()
@@ -54,19 +55,17 @@ export function useTimeSeries(
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  // SCL classes considered valid (cloud-free): 2=dark area, 4=vegetation,
-  // 5=not-vegetated, 6=water
-  const VALID_SCL = new Set([2, 4, 5, 6])
-
-  // Recomputes automatically when bandData, dataSource, or maskClouds changes —
-  // no network round-trip needed when toggling cloud masking or switching index.
+  // Recomputes automatically when bandData, dataSource, maskClouds or the valid
+  // SCL classes change — no network round-trip needed when toggling cloud
+  // masking, adjusting classes, or switching index.
   const data = computed<TimeSeriesPoint[]>(() => {
     const ds = dataSource.value
     const bands = bandData.value
     if (!ds || !bands) return []
+    const validScl = new Set(validSclClasses.value)
     return Object.entries(bands)
       .map(([date, b]) => {
-        if (maskClouds.value && b.SCL !== null && !VALID_SCL.has(Math.round(b.SCL))) {
+        if (maskClouds.value && b.SCL !== null && !validScl.has(Math.round(b.SCL))) {
           return { date, value: null }
         }
         return { date, value: ds.compute(b) }
