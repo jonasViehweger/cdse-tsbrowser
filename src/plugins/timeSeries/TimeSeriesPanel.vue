@@ -40,6 +40,23 @@
         <input v-model="pendingMaskClouds" type="checkbox" />
       </label>
 
+      <div v-if="pendingMaskClouds" class="field-row scl-row">
+        <div class="scl-header">
+          <span class="field-label">Keep classes</span>
+          <button type="button" class="link-btn" @click="resetSclToDefault">Reset</button>
+        </div>
+        <div class="scl-grid">
+          <label v-for="c in SCL_CLASSES" :key="c.value" class="scl-item">
+            <input v-model="pendingValidScl" type="checkbox" :value="c.value" />
+            <span>{{ c.value }} — {{ c.label }}</span>
+          </label>
+        </div>
+      </div>
+
+      <p v-if="pendingMaskClouds && pendingValidScl.length === 0" class="field-hint scl-hint">
+        With no classes selected every classified acquisition is masked out.
+      </p>
+
       <label class="field-row">
         <span class="field-label">Y-axis</span>
         <select v-model="pendingYMode" class="field-select">
@@ -82,7 +99,13 @@ import { useAppStore } from '../../stores/app'
 import { useLayoutStore } from '../../stores/layout'
 import { usePanelSettingsStore } from '../../stores/panelSettings'
 import { useTimeSeries } from '../../composables/useTimeSeries'
-import { useTimeSeriesConfig, Y_MODES, type YMode } from './useTimeSeriesConfig'
+import {
+  useTimeSeriesConfig,
+  Y_MODES,
+  SCL_CLASSES,
+  DEFAULT_VALID_SCL,
+  type YMode,
+} from './useTimeSeriesConfig'
 import { computeRobustRange } from '../../utils/chartData'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
@@ -92,6 +115,7 @@ import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 type UserParams = {
   dataSourceId?: string
   maskClouds?: boolean
+  validSclClasses?: number[]
   yMode?: YMode
   yMin?: number | null
   yMax?: number | null
@@ -113,10 +137,11 @@ const appStore = useAppStore()
 const layoutStore = useLayoutStore()
 const settingsStore = usePanelSettingsStore()
 
-const { dataSourceId, maskClouds, yMode, yMin, yMax, dataSource, allDataSources } =
+const { dataSourceId, maskClouds, validSclClasses, yMode, yMin, yMax, dataSource, allDataSources } =
   useTimeSeriesConfig({
     dataSourceId: userParams()?.dataSourceId,
     maskClouds: userParams()?.maskClouds,
+    validSclClasses: userParams()?.validSclClasses,
     yMode: userParams()?.yMode,
     yMin: userParams()?.yMin ?? null,
     yMax: userParams()?.yMax ?? null,
@@ -127,6 +152,7 @@ const { dataSourceId, maskClouds, yMode, yMin, yMax, dataSource, allDataSources 
 const showSettings = ref(false)
 const pendingDataSourceId = ref(dataSourceId.value)
 const pendingMaskClouds = ref(maskClouds.value)
+const pendingValidScl = ref<number[]>([...validSclClasses.value])
 const pendingYMode = ref<YMode>(yMode.value)
 // Kept as strings: <input type="number"> yields '' when cleared, which must
 // stay distinguishable from a genuine 0.
@@ -148,9 +174,14 @@ const manualRangeInvalid = computed(() => {
   return lo >= hi
 })
 
+function resetSclToDefault() {
+  pendingValidScl.value = [...DEFAULT_VALID_SCL]
+}
+
 function openSettings() {
   pendingDataSourceId.value = dataSourceId.value
   pendingMaskClouds.value = maskClouds.value
+  pendingValidScl.value = [...validSclClasses.value]
   pendingYMode.value = yMode.value
   pendingYMin.value = yMin.value?.toString() ?? ''
   pendingYMax.value = yMax.value?.toString() ?? ''
@@ -160,6 +191,8 @@ function openSettings() {
 function applySettings() {
   dataSourceId.value = pendingDataSourceId.value
   maskClouds.value = pendingMaskClouds.value
+  // Sort so the persisted order is stable regardless of click order.
+  validSclClasses.value = [...pendingValidScl.value].sort((a, b) => a - b)
   yMode.value = pendingYMode.value
   yMin.value = parseBound(pendingYMin.value)
   yMax.value = parseBound(pendingYMax.value)
@@ -184,16 +217,22 @@ onUnmounted(() => {
 
 // Keep dockview params in sync so toJSON() captures current settings,
 // then explicitly save — updateParameters() does not fire onDidLayoutChange.
-watch([dataSourceId, maskClouds, yMode, yMin, yMax], () => {
+watch([dataSourceId, maskClouds, validSclClasses, yMode, yMin, yMax], () => {
   panelApi()?.updateParameters({
     dataSourceId: dataSourceId.value,
     maskClouds: maskClouds.value,
+    validSclClasses: [...validSclClasses.value],
     yMode: yMode.value,
     yMin: yMin.value,
     yMax: yMax.value,
   })
   layoutStore.saveLayout()
 })
+
+/** Both arrays are kept sorted, so an element-wise compare is enough. */
+function sameClasses(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i])
+}
 
 // When dockview restores a layout via fromJSON(), it delivers params after
 // the component mounts. Sync them back into the local refs.
@@ -203,6 +242,8 @@ watch(() => props.params?.params, (p) => {
     dataSourceId.value = p.dataSourceId
   if (p.maskClouds != null && p.maskClouds !== maskClouds.value)
     maskClouds.value = p.maskClouds
+  if (p.validSclClasses != null && !sameClasses(p.validSclClasses, validSclClasses.value))
+    validSclClasses.value = [...p.validSclClasses]
   if (p.yMode != null && p.yMode !== yMode.value) yMode.value = p.yMode
   // yMin/yMax are legitimately null in non-manual modes, so compare directly
   // rather than null-guarding — otherwise a cleared bound never restores.
@@ -217,7 +258,7 @@ onMounted(() => {
 
 // ── Data & display ──────────────────────────────────────────────────────────
 
-const { data, loading, error } = useTimeSeries(dataSource, maskClouds)
+const { data, loading, error } = useTimeSeries(dataSource, maskClouds, validSclClasses)
 
 // Switching to manual with empty fields: seed them from the range the user is
 // currently looking at, so they adjust rather than guess from scratch.
@@ -331,11 +372,60 @@ function onPointClick(date: string) {
   user-select: none;
 }
 
+/* ── SCL class picker ── */
+
+.scl-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.scl-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0;
+}
+
+.scl-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border-mid);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.scl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  user-select: none;
+}
+
 .field-hint {
   margin: -8px 0 0 102px;
   font-size: 0.75rem;
   line-height: 1.35;
   color: var(--text-muted);
+}
+
+/* The class picker is full-width, so its hint isn't indented past a label. */
+.scl-hint {
+  margin-left: 0;
 }
 
 </style>
