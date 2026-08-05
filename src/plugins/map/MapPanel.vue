@@ -133,21 +133,24 @@ function initMap(instanceId: string) {
 async function setup() {
   if (!authStore.isAuthenticated) return
   status.value = 'loading'
-  try {
-    const instanceId = await ensureWmsInstance()
-    initMap(instanceId)
-  } catch (e) {
-    status.value = 'error'
-    errorDetail.value = e instanceof Error ? e.message : String(e)
-  }
-  // Fetch layer list independently so map is usable even if this fails
+  // Fetch the layer list first: it exercises the configuration API with the
+  // cached instance ID and repairs it if that ID belongs to another account.
+  // The map's tile requests are plain <img> loads whose 403s we cannot inspect,
+  // so the instance has to be validated before the WMS layer is built.
   try {
     layers.value = await listWmsLayers()
     layersStatus.value = 'ready'
-    // Update title now that we have the real layer name
-    panelApi()?.setTitle(layerTitle(activeLayer.value))
   } catch {
     layersStatus.value = 'error'
+  }
+  try {
+    const instanceId = await ensureWmsInstance()
+    initMap(instanceId)
+    // Update title now that we have the real layer name
+    panelApi()?.setTitle(layerTitle(activeLayer.value))
+  } catch (e) {
+    status.value = 'error'
+    errorDetail.value = e instanceof Error ? e.message : String(e)
   }
 }
 

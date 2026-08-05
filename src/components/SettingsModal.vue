@@ -66,6 +66,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { fetchToken } from '../services/auth'
+import { invalidateWmsInstance } from '../services/wmsConfigApi'
 
 defineEmits<{ close: [] }>()
 
@@ -81,6 +82,8 @@ async function saveAndConnect() {
   error.value = null
   loading.value = true
   try {
+    // The cached WMS instance belongs to the previous account and would 403.
+    if (localClientId.value !== authStore.clientId) invalidateWmsInstance()
     authStore.setCredentials(localClientId.value, localClientSecret.value)
     await fetchToken(localClientId.value, localClientSecret.value)
     if (localRemember.value) authStore.savePersisted()
