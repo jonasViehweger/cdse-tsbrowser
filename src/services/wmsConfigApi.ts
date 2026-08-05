@@ -8,6 +8,14 @@ const LAYERS_URL = (id: string) => `${import.meta.env.VITE_API_BASE}/api/v2/conf
 
 interface WmsInstance { id: string; name: string; domainAccountId: string }
 
+/** Error carrying the HTTP status so callers can react to specific codes (e.g. 403). */
+export class ApiError extends Error {
+  constructor(public status: number, body: string) {
+    super(`${status}: ${body}`)
+    this.name = 'ApiError'
+  }
+}
+
 /** Extract domainAccountId from the JWT user_context claim ("default-<uuid>"). */
 function domainAccountIdFromToken(token: string): string {
   try {
@@ -26,7 +34,7 @@ async function authed(url: string, init: RequestInit = {}): Promise<Response> {
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new Error(`${res.status}: ${body}`)
+    throw new ApiError(res.status, body)
   }
   return res
 }
@@ -226,6 +234,31 @@ let layerCache: WmsLayer[] | null = null
 let layerInflight: Promise<WmsLayer[]> | null = null
 
 /**
+ * Drops the cached instance ID (and everything derived from it) so the next
+ * call to ensureWmsInstance() re-discovers or re-creates the instance.
+ * The cached ID belongs to one account — after a credential change the old
+ * instance is not ours any more and the API answers 403.
+ */
+export function invalidateWmsInstance(): void {
+  localStorage.removeItem(INSTANCE_ID_KEY)
+  layerCache = null
+}
+
+/**
+ * Runs `fn`; if it fails with 403 the cached instance ID belonged to another
+ * account, so it is discarded and `fn` is retried once against a fresh one.
+ */
+async function withInstanceRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 403) throw e
+    invalidateWmsInstance()
+    return fn()
+  }
+}
+
+/**
  * Returns the list of WMS layers for this app's instance.
  * Fetched once per session and cached in memory.
  */
@@ -235,12 +268,14 @@ export async function listWmsLayers(): Promise<WmsLayer[]> {
   if (!layerInflight) {
     layerInflight = (async () => {
       try {
-        const instanceId = await ensureWmsInstance()
-        const res = await authed(LAYERS_URL(instanceId))
-        layerCache = (await res.json() as WmsLayer[])
-          .map(l => ({ id: l.id, title: l.title }))
-          .sort((a, b) => a.title.localeCompare(b.title))
-        return layerCache
+        return await withInstanceRetry(async () => {
+          const instanceId = await ensureWmsInstance()
+          const res = await authed(LAYERS_URL(instanceId))
+          layerCache = (await res.json() as WmsLayer[])
+            .map(l => ({ id: l.id, title: l.title }))
+            .sort((a, b) => a.title.localeCompare(b.title))
+          return layerCache
+        })
       } finally {
         layerInflight = null
       }

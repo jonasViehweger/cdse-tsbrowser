@@ -98,6 +98,7 @@ import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { fetchToken } from '../services/auth'
+import { invalidateWmsInstance } from '../services/wmsConfigApi'
 import { serialiseUrl } from '../utils/url'
 import { basemapUrl } from '../utils/basemap'
 import { parseLatLon, formatLatLon } from '../utils/coordinate'
@@ -116,6 +117,8 @@ async function connect() {
   authError.value = null
   authLoading.value = true
   try {
+    // The cached WMS instance belongs to the previous account and would 403.
+    if (clientId.value !== authStore.clientId) invalidateWmsInstance()
     authStore.setCredentials(clientId.value, clientSecret.value)
     await fetchToken(clientId.value, clientSecret.value)
     if (remember.value) authStore.savePersisted()
