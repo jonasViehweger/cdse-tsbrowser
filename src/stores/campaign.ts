@@ -19,6 +19,13 @@ export const useCampaignStore = defineStore('campaign', () => {
   const sessionValues = ref<Record<string, unknown>>({})
 
   /**
+   * Bumped on every change to labelled data. Sync layers (see stores/github.ts)
+   * remember the revision they last wrote out to tell "dirty" from "in sync"
+   * without diffing the whole record set.
+   */
+  const revision = ref(0)
+
+  /**
    * True when the URL schema and the IDB schema for the same campaign name differ.
    * Save & Next is blocked while this is true.
    */
@@ -99,6 +106,7 @@ export const useCampaignStore = defineStore('campaign', () => {
 
     isEphemeral.value = false
     sessionValues.value = {}
+    revision.value++
     return true
   }
 
@@ -116,7 +124,22 @@ export const useCampaignStore = defineStore('campaign', () => {
     isEphemeral.value = true
   }
 
-  function loadGeoJSON(geojson: CampaignGeoJSON) {
+  /**
+   * Load a full campaign GeoJSON.
+   *
+   * `prefer` decides who wins when a sample is labelled both in the file and in
+   * IDB: 'local' (the default) protects work that hasn't been written back to
+   * the file yet, 'remote' discards it in favour of the file — which is what an
+   * explicit "pull and overwrite" asks for.
+   *
+   * Returns the revision that corresponds to the file's contents alone. A later
+   * `revision` means IDB contributed labels the file doesn't have yet, i.e. the
+   * campaign is already dirty relative to its source.
+   */
+  async function loadGeoJSON(
+    geojson: CampaignGeoJSON,
+    opts?: { prefer?: 'local' | 'remote' },
+  ): Promise<{ fileRevision: number }> {
     const params: CampaignParams = {
       name: geojson.campaign.name,
       flagLabels: geojson.campaign.flagLabels,
@@ -142,21 +165,33 @@ export const useCampaignStore = defineStore('campaign', () => {
       }
     }
 
-    // Set immediate synchronous state; async merge refines it (IDB wins over file)
+    // Set state synchronously first so callers that don't await still see the
+    // file's contents immediately; the IDB merge below only refines it.
     sampleRecords.value = fromFile
-    loadCampaignRecords(geojson.campaign.name)
-      .then(stored => {
-        if (stored) sampleRecords.value = { ...fromFile, ...stored }
-        saveCampaignRecords(geojson.campaign.name, sampleRecords.value).catch(() => {})
-      })
-      .catch(() => {
-        // fromFile already set synchronously; persist it
-        saveCampaignRecords(geojson.campaign.name, fromFile).catch(() => {})
-      })
+    revision.value++
+    const fileRevision = revision.value
 
     // Persist features separately (large, written once)
     saveCampaignFeatures(geojson.campaign.name, geojson.features).catch(() => {})
 
+    if (opts?.prefer === 'remote') {
+      await saveCampaignRecords(geojson.campaign.name, fromFile).catch(() => {})
+      return { fileRevision }
+    }
+
+    try {
+      const stored = await loadCampaignRecords(geojson.campaign.name)
+      if (stored) sampleRecords.value = { ...fromFile, ...stored }
+      // Local labels the file doesn't carry mean this campaign is already
+      // ahead of its source — reflect that in the revision.
+      if (!deepEqual(sampleRecords.value, fromFile)) revision.value++
+      await saveCampaignRecords(geojson.campaign.name, sampleRecords.value).catch(() => {})
+    } catch {
+      // fromFile is already in place; persist it
+      await saveCampaignRecords(geojson.campaign.name, fromFile).catch(() => {})
+    }
+
+    return { fileRevision }
   }
 
   function loadMinimalGeoJSON(geojson: { type: string; features: Array<{ type: string; geometry: CampaignFeature['geometry']; properties: { sample_id: string } }> }) {
@@ -168,6 +203,7 @@ export const useCampaignStore = defineStore('campaign', () => {
     isEphemeral.value = false
     schemaMismatch.value = false
     features.value = mapped
+    revision.value++
     if (schema.value?.name) {
       saveCampaignFeatures(schema.value.name, mapped).catch(() => {})
     }
@@ -175,6 +211,7 @@ export const useCampaignStore = defineStore('campaign', () => {
 
   function saveSampleRecord(sampleId: string, record: SampleRecord) {
     sampleRecords.value[sampleId] = record
+    revision.value++
     // Update session_persistent fields
     const fields = schema.value?.fields ?? []
     for (const field of fields) {
@@ -236,6 +273,7 @@ export const useCampaignStore = defineStore('campaign', () => {
   function setSchema(params: CampaignParams) {
     const nameChanged = schema.value?.name !== params.name
     schema.value = params
+    revision.value++
     if (nameChanged) {
       features.value = []
       sampleRecords.value = {}
@@ -255,12 +293,14 @@ export const useCampaignStore = defineStore('campaign', () => {
     sessionValues.value = {}
     schemaMismatch.value = false
     isEphemeral.value = false
+    revision.value++
   }
 
   return {
     schema,
     features,
     sampleRecords,
+    revision,
     schemaMismatch,
     isEphemeral,
     isActive,
