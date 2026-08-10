@@ -54,6 +54,12 @@ export const PANEL_PLUGINS: PanelPlugin[] = [
     defaultTitle: 'Upload / Export',
   },
   {
+    id: 'campaignGithubPanel',
+    name: 'Campaign GitHub Sync',
+    singleton: true,
+    defaultTitle: 'GitHub',
+  },
+  {
     id: 'labellingFormPanel',
     name: 'Labelling Form',
     singleton: true,
