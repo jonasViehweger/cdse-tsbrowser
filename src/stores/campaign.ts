@@ -5,6 +5,33 @@ import { saveCampaignFeatures, loadCampaignFeatures, saveCampaignRecords, loadCa
 import { deepEqual } from '../utils/url'
 import { useAppStore } from './app'
 
+/**
+ * Labelling records embedded in a campaign file's features.
+ *
+ * Records are written to IDB through a JSON round-trip, which drops `undefined`
+ * values — so anything built here that can't survive that would read as a local
+ * divergence on the next load and show a campaign as having unpushed changes it
+ * doesn't have. Keys are therefore only set when they carry something.
+ */
+export function recordsFromFeatures(features: CampaignFeature[]): Record<string, SampleRecord> {
+  const records: Record<string, SampleRecord> = {}
+
+  for (const feat of features) {
+    const { sample_id, flags, ...rest } = feat.properties
+
+    const record: SampleRecord = {}
+    // Flags alone are a labelled sample: a campaign can have no metadata fields.
+    if (flags && Object.keys(flags).length > 0) record.flags = flags
+    for (const [key, value] of Object.entries(rest)) {
+      if (value != null) record[key] = value
+    }
+
+    if (Object.keys(record).length > 0) records[sample_id] = record
+  }
+
+  return records
+}
+
 export const useCampaignStore = defineStore('campaign', () => {
   /** The active campaign schema. null = no campaign active. */
   const schema = ref<CampaignParams | null>(null)
@@ -157,13 +184,7 @@ export const useCampaignStore = defineStore('campaign', () => {
     features.value = geojson.features
 
     // Extract any labelled properties already embedded in the GeoJSON
-    const fromFile: Record<string, SampleRecord> = {}
-    for (const feat of geojson.features) {
-      const { sample_id, flags, ...rest } = feat.properties
-      if (Object.keys(rest).some(k => rest[k] != null)) {
-        fromFile[sample_id] = { flags, ...rest }
-      }
-    }
+    const fromFile = recordsFromFeatures(geojson.features)
 
     // Set state synchronously first so callers that don't await still see the
     // file's contents immediately; the IDB merge below only refines it.

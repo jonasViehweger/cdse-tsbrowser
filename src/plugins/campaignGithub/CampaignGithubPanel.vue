@@ -38,20 +38,72 @@
 
     <div class="section">
       <div class="section-heading">Campaign file</div>
+
       <div class="field-row">
         <input
-          v-model="sourceSpec"
+          v-model="repoInput"
           type="text"
           class="text-input"
-          placeholder="owner/repo@main:campaign.geojson"
+          placeholder="owner/repo — or paste a GitHub file URL"
           spellcheck="false"
-          @keyup.enter="doLoad"
+          @keyup.enter="doBrowse"
         />
-        <button class="btn-secondary" :disabled="!sourceSpec || githubStore.isBusy" @click="doLoad">
-          {{ githubStore.status === 'pulling' ? 'Loading…' : 'Load' }}
+        <button class="btn-secondary" :disabled="!repoInput || browsing" @click="doBrowse">
+          {{ browsing ? 'Reading…' : 'Browse' }}
         </button>
       </div>
-      <p class="hint">Leave off <code>@ref</code> to use the repository's default branch.</p>
+
+      <template v-if="branches.length">
+        <div class="field-row">
+          <label class="select-label">Branch</label>
+          <select v-model="selectedBranch" class="select-input" :disabled="browsing" @change="loadFiles()">
+            <option v-for="b in branches" :key="b" :value="b">{{ b }}</option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label class="select-label">File</label>
+          <select v-model="selectedPath" class="select-input" :disabled="browsing || !files.length">
+            <option v-if="!files.length" value="">{{ browsing ? 'Reading…' : 'No .geojson files found' }}</option>
+            <option v-for="f in files" :key="f" :value="f">{{ f }}</option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <button
+            class="btn-secondary"
+            :disabled="!selectedPath || githubStore.isBusy"
+            @click="doLoadSelected"
+          >
+            {{ githubStore.status === 'pulling' ? 'Loading…' : 'Load campaign' }}
+          </button>
+        </div>
+
+        <p v-if="truncated" class="hint">
+          This repository is too large to list in full — some files may be missing.
+          Use manual entry if the one you want isn't here.
+        </p>
+      </template>
+
+      <p v-if="!showManual" class="hint">
+        <button class="link-btn" @click="showManual = true">Enter a file spec manually</button>
+      </p>
+      <template v-else>
+        <div class="field-row">
+          <input
+            v-model="sourceSpec"
+            type="text"
+            class="text-input"
+            placeholder="owner/repo@main:campaign.geojson"
+            spellcheck="false"
+            @keyup.enter="doLoad"
+          />
+          <button class="btn-secondary" :disabled="!sourceSpec || githubStore.isBusy" @click="doLoad">
+            {{ githubStore.status === 'pulling' ? 'Loading…' : 'Load' }}
+          </button>
+        </div>
+        <p class="hint">Leave off <code>@ref</code> to use the repository's default branch.</p>
+      </template>
 
       <template v-if="githubStore.hasSource">
         <div class="sync-status">
@@ -90,7 +142,17 @@ import { ref, computed, watch } from 'vue'
 import { useAppStore } from '../../stores/app'
 import { useCampaignStore } from '../../stores/campaign'
 import { useGithubStore } from '../../stores/github'
-import { parseSourceSpec, formatSourceSpec, sourceWebUrl } from '../../services/githubApi'
+import {
+  parseSourceSpec,
+  formatSourceSpec,
+  sourceWebUrl,
+  parseRepoInput,
+  resolveRefAndPath,
+  fetchDefaultBranch,
+  listBranches,
+  listCampaignFiles,
+} from '../../services/githubApi'
+import type { RepoRef } from '../../services/githubApi'
 
 const appStore = useAppStore()
 const campaignStore = useCampaignStore()
@@ -99,14 +161,33 @@ const githubStore = useGithubStore()
 const tokenInput = ref('')
 const rememberToken = ref(githubStore.isPersisted())
 const connecting = ref(false)
-const sourceSpec = ref(githubStore.source ? formatSourceSpec(githubStore.source) : '')
 const overwriteLocal = ref(false)
 const successText = ref('')
+
+// ── Browsing ────────────────────────────────────────────────────────────────
+
+const repoInput = ref(githubStore.source ? `${githubStore.source.owner}/${githubStore.source.repo}` : '')
+const repo = ref<RepoRef | null>(null)
+const branches = ref<string[]>([])
+const selectedBranch = ref('')
+const files = ref<string[]>([])
+const selectedPath = ref('')
+const truncated = ref(false)
+const browsing = ref(false)
+
+/** Trees are immutable per (repo, ref) for a session — don't refetch on toggling back. */
+const treeCache = new Map<string, { paths: string[]; truncated: boolean }>()
+
+// Manual spec entry stays available: a repo the API can't list (rate limit, or a
+// listing too large) still has to be reachable.
+const showManual = ref(false)
+const sourceSpec = ref(githubStore.source ? formatSourceSpec(githubStore.source) : '')
 
 // The source can change without this panel doing anything — a `?gh=` URL pull at
 // startup, or switching campaigns in the toolbar.
 watch(() => githubStore.source, (src) => {
   sourceSpec.value = src ? formatSourceSpec(src) : ''
+  repoInput.value = src ? `${src.owner}/${src.repo}` : ''
   successText.value = ''
 })
 
@@ -130,6 +211,93 @@ async function doConnect() {
     successText.value = `Connected as ${githubStore.login}.`
   } catch { /* githubStore.error carries the message */ }
   connecting.value = false
+}
+
+/** Ask the repository what it has: branches, then candidate files on one of them. */
+async function doBrowse() {
+  const parsed = parseRepoInput(repoInput.value)
+  if (!parsed) {
+    githubStore.error = 'Expected owner/repo, or a GitHub URL such as https://github.com/owner/repo/blob/main/campaign.geojson'
+    return
+  }
+
+  browsing.value = true
+  githubStore.error = null
+  successText.value = ''
+  branches.value = []
+  files.value = []
+  selectedPath.value = ''
+  truncated.value = false
+
+  const target: RepoRef = { owner: parsed.owner, repo: parsed.repo }
+  repo.value = target
+  const token = githubStore.token || undefined
+
+  try {
+    const [defaultBranch, list] = await Promise.all([
+      fetchDefaultBranch(target, token),
+      listBranches(target, token),
+    ])
+    // Past 100 branches the listing is partial, and the default may not be in it.
+    branches.value = list.includes(defaultBranch) ? list : [defaultBranch, ...list]
+
+    // A pasted file URL carries a ref and a path glued together; now that the
+    // real refs are known, they can be told apart.
+    const resolved = parsed.rest ? resolveRefAndPath(parsed.rest, branches.value) : null
+    selectedBranch.value = resolved?.ref ?? defaultBranch
+
+    await loadFiles(resolved?.path ?? '')
+  } catch (e) {
+    githubStore.error = e instanceof Error ? e.message : String(e)
+  } finally {
+    browsing.value = false
+  }
+}
+
+/** List candidate files on the selected branch, preselecting the likeliest one. */
+async function loadFiles(preferPath = '') {
+  if (!repo.value || !selectedBranch.value) return
+  const key = `${repo.value.owner}/${repo.value.repo}@${selectedBranch.value}`
+
+  browsing.value = true
+  githubStore.error = null
+  try {
+    let entry = treeCache.get(key)
+    if (!entry) {
+      entry = await listCampaignFiles(repo.value, selectedBranch.value, githubStore.token || undefined)
+      treeCache.set(key, entry)
+    }
+    files.value = entry.paths
+    truncated.value = entry.truncated
+    selectedPath.value = pickPath(entry.paths, preferPath)
+  } catch (e) {
+    files.value = []
+    selectedPath.value = ''
+    githubStore.error = e instanceof Error ? e.message : String(e)
+  } finally {
+    browsing.value = false
+  }
+}
+
+/** The file the user most likely wants, so the common case is one click. */
+function pickPath(paths: string[], preferPath: string): string {
+  if (preferPath && paths.includes(preferPath)) return preferPath
+  if (paths.length === 1) return paths[0]
+  return paths.find(p => /campaign/i.test(p)) ?? ''
+}
+
+async function doLoadSelected() {
+  if (!repo.value || !selectedPath.value) return
+  successText.value = ''
+  try {
+    await githubStore.pull({
+      owner: repo.value.owner,
+      repo: repo.value.repo,
+      ref: selectedBranch.value,
+      path: selectedPath.value,
+    })
+    afterPull()
+  } catch { /* githubStore.error carries the message */ }
 }
 
 async function doLoad() {
@@ -234,6 +402,28 @@ async function doPush() {
 .text-input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.select-label {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 48px;
+}
+
+.select-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border-mid);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: inherit;
+  padding: 5px 6px;
+}
+
+.select-input:disabled {
+  opacity: 0.5;
 }
 
 .btn-primary {

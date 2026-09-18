@@ -5,6 +5,11 @@ import {
   sourceWebUrl,
   fetchCampaignFile,
   putCampaignFile,
+  parseRepoInput,
+  resolveRefAndPath,
+  listBranches,
+  listCampaignFiles,
+  fetchDefaultBranch,
   GithubError,
 } from './githubApi'
 
@@ -144,6 +149,113 @@ describe('fetchCampaignFile', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('failed to fetch')))
     await expect(fetchCampaignFile(SRC)).rejects.toBeInstanceOf(GithubError)
     await expect(fetchCampaignFile(SRC)).rejects.toMatchObject({ kind: 'network' })
+  })
+})
+
+// ── Browsing ─────────────────────────────────────────────────────────────────
+
+describe('parseRepoInput', () => {
+  it('accepts a bare owner/repo', () => {
+    expect(parseRepoInput('acme/campaigns')).toEqual({ owner: 'acme', repo: 'campaigns' })
+  })
+
+  it('accepts a repo URL, with or without scheme and .git', () => {
+    expect(parseRepoInput('https://github.com/acme/campaigns')).toEqual({ owner: 'acme', repo: 'campaigns' })
+    expect(parseRepoInput('github.com/acme/campaigns.git')).toEqual({ owner: 'acme', repo: 'campaigns' })
+  })
+
+  it('keeps the ref+path tail of a blob URL unsplit', () => {
+    expect(parseRepoInput('https://github.com/acme/campaigns/blob/feat/gh/assets/c.geojson')).toEqual({
+      owner: 'acme', repo: 'campaigns', rest: 'feat/gh/assets/c.geojson',
+    })
+  })
+
+  it('handles tree URLs and raw.githubusercontent URLs', () => {
+    expect(parseRepoInput('https://github.com/acme/campaigns/tree/main/assets')?.rest).toBe('main/assets')
+    expect(parseRepoInput('https://raw.githubusercontent.com/acme/campaigns/main/c.geojson')?.rest)
+      .toBe('main/c.geojson')
+  })
+
+  it('rejects input that names no repository', () => {
+    expect(parseRepoInput('acme')).toBeNull()
+    expect(parseRepoInput('https://github.com/acme')).toBeNull()
+    expect(parseRepoInput('   ')).toBeNull()
+  })
+})
+
+describe('resolveRefAndPath', () => {
+  const refs = ['main', 'feat/gh', 'feat/gh/nested']
+
+  it('prefers the longest matching ref', () => {
+    expect(resolveRefAndPath('feat/gh/assets/c.geojson', refs))
+      .toEqual({ ref: 'feat/gh', path: 'assets/c.geojson' })
+    expect(resolveRefAndPath('feat/gh/nested/c.geojson', refs))
+      .toEqual({ ref: 'feat/gh/nested', path: 'c.geojson' })
+  })
+
+  it('splits a simple branch', () => {
+    expect(resolveRefAndPath('main/dir/c.geojson', refs)).toEqual({ ref: 'main', path: 'dir/c.geojson' })
+  })
+
+  it('recognises a commit sha without consulting the ref list', () => {
+    const sha = 'a'.repeat(40)
+    expect(resolveRefAndPath(`${sha}/c.geojson`, [])).toEqual({ ref: sha, path: 'c.geojson' })
+  })
+
+  it('returns an empty path for a bare ref', () => {
+    expect(resolveRefAndPath('feat/gh', refs)).toEqual({ ref: 'feat/gh', path: '' })
+  })
+
+  it('returns null when no ref matches', () => {
+    expect(resolveRefAndPath('nope/c.geojson', refs)).toBeNull()
+  })
+})
+
+describe('repository listing', () => {
+  it('returns branch names', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{ name: 'main' }, { name: 'feat/gh' }])))
+    expect(await listBranches({ owner: 'a', repo: 'b' })).toEqual(['main', 'feat/gh'])
+  })
+
+  it('reads the default branch', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ default_branch: 'trunk' })))
+    expect(await fetchDefaultBranch({ owner: 'a', repo: 'b' })).toBe('trunk')
+  })
+
+  it('lists only geojson blobs when the repo has any, and flags truncation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      truncated: true,
+      tree: [
+        { path: 'README.md', type: 'blob' },
+        { path: 'package.json', type: 'blob' },      // noise in a code repo
+        { path: 'assets', type: 'tree' },            // directories aren't files
+        { path: 'assets/b.geojson', type: 'blob' },
+        { path: 'a.geojson', type: 'blob' },
+      ],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { paths, truncated } = await listCampaignFiles({ owner: 'a', repo: 'b' }, 'feat/gh')
+    expect(paths).toEqual(['a.geojson', 'assets/b.geojson'])
+    expect(truncated).toBe(true)
+    // Slashes in the branch name belong to the ref and must not be escaped away
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.github.com/repos/a/b/git/trees/feat/gh?recursive=1')
+  })
+
+  it('falls back to .json only when the repo has no .geojson', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      tree: [
+        { path: 'campaigns/forest.json', type: 'blob' },
+        { path: 'README.md', type: 'blob' },
+      ],
+    })))
+    const { paths } = await listCampaignFiles({ owner: 'a', repo: 'b' }, 'main')
+    expect(paths).toEqual(['campaigns/forest.json'])
+  })
+
+  it('surfaces a missing repository as notfound', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ message: 'Not Found' }, 404)))
+    await expect(listBranches({ owner: 'a', repo: 'nope' })).rejects.toMatchObject({ kind: 'notfound' })
   })
 })
 
