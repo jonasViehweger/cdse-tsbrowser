@@ -176,7 +176,7 @@ const panelId = computed(() => panelApi()?.id ?? '')
 
 watch(panelId, (id, oldId) => {
   if (oldId) settingsStore.unregister(oldId)
-  if (id) settingsStore.register(id, openSettings)
+  if (id) settingsStore.register(id, 'settings', openSettings)
 }, { immediate: true })
 
 onUnmounted(() => {
