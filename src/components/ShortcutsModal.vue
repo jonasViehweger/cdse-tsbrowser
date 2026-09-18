@@ -31,6 +31,8 @@ const shortcuts = [
   { keys: ['f'],            description: 'Focus flag dropdown for selected date' },
   { keys: ['r'],            description: 'Remove flag from selected date' },
   { keys: ['n'],            description: 'Save & Next (campaign labelling)' },
+  { keys: ['Shift', 'click'], description: 'Pick a new point on an imagery map' },
+  { keys: ['Esc'],          description: 'Cancel point picking' },
   { keys: ['?'],            description: 'Toggle this help panel' },
 ]
 </script>

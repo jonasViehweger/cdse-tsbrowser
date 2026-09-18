@@ -37,6 +37,7 @@ import { ensureWmsInstance, listWmsLayers } from '../../services/wmsConfigApi'
 import type { WmsLayer } from '../../services/wmsConfigApi'
 import { useAuthStore } from '../../stores/auth'
 import { basemapUrl } from '../../utils/basemap'
+import { useMapPointPicker } from '../../composables/useMapPointPicker'
 import { buildPixelPolygon } from '../../utils/geometry'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 
@@ -59,6 +60,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const layoutStore = useLayoutStore()
 const settingsStore = usePanelSettingsStore()
+const pointPicker = useMapPointPicker()
 
 const mapEl = ref<HTMLDivElement | null>(null)
 const activeLayer = ref<string>(props.params?.params?.activeLayer ?? 'TRUE-COLOR')
@@ -122,6 +124,8 @@ function initMap(instanceId: string) {
     fillOpacity: 0,
     weight: 2,
   }).addTo(map)
+
+  pointPicker.attach(map)
 
   // Resize observer so map redraws when the panel is resized by dockview
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
@@ -212,10 +216,12 @@ watch(() => props.params?.params, (p) => {
   }
 })
 
-// Update marker when coordinate changes
+// Update marker when coordinate changes. Only recentre when the new point is
+// off-screen: a point picked inside the view must not slide out from under the
+// cursor, while one set elsewhere (URL, coordinate input) still gets brought in.
 watch(coordinate, ([lon, lat]) => {
   marker?.setLatLngs(pixelLatLngs(lon, lat))
-  map?.panTo([lat, lon])
+  if (map && !map.getBounds().contains([lat, lon])) map.panTo([lat, lon])
 })
 
 // Swap basemap when effective theme changes
