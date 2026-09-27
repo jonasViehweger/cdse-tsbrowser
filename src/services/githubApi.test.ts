@@ -291,4 +291,97 @@ describe('putCampaignFile', () => {
     await expect(putCampaignFile({ ...SRC, sha: 'old' }, '{}', 'm', 'tok'))
       .rejects.toMatchObject({ kind: 'conflict' })
   })
+
+  it('names the missing token permission when GitHub sends one', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      jsonResponse({ message: 'Not Found' }, 404, { 'x-accepted-github-permissions': 'contents=write' })
+    ))
+    await expect(putCampaignFile({ ...SRC, sha: 'old' }, '{}', 'm', 'tok'))
+      .rejects.toMatchObject({ kind: 'notfound', message: expect.stringContaining('contents=write') })
+  })
+
+  it('surfaces GitHub\'s own wording on a rejected request', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      jsonResponse({ message: 'content is too large' }, 422)
+    ))
+    await expect(putCampaignFile(SRC, '{}', 'm', 'tok'))
+      .rejects.toMatchObject({ kind: 'invalid', message: expect.stringContaining('content is too large') })
+  })
+})
+
+// ── Large writes (Git Data API) ──────────────────────────────────────────────
+
+/** Bigger than the Contents API write path will take, once base64-encoded. */
+const BIG = 'x'.repeat(1024 * 1024)
+
+/** Route the blob → tree → commit → ref sequence by URL and method. */
+function gitDataMock(overrides: Record<string, () => Response> = {}) {
+  return vi.fn((url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET'
+    for (const [key, fn] of Object.entries(overrides)) {
+      if (url.includes(key)) return Promise.resolve(fn())
+    }
+    if (url.includes('/contents/')) return Promise.resolve(jsonResponse({ sha: 'old1' }))
+    if (url.includes('/git/ref/heads/')) return Promise.resolve(jsonResponse({ object: { sha: 'head1' } }))
+    if (url.includes('/git/commits/')) return Promise.resolve(jsonResponse({ tree: { sha: 'tree0' } }))
+    if (url.includes('/git/blobs')) return Promise.resolve(jsonResponse({ sha: 'blob1' }))
+    if (url.includes('/git/trees')) return Promise.resolve(jsonResponse({ sha: 'tree1' }))
+    if (url.includes('/git/commits')) return Promise.resolve(jsonResponse({ sha: 'commit1' }))
+    if (url.includes('/git/refs/heads/') && method === 'PATCH') return Promise.resolve(jsonResponse({}))
+    throw new Error(`unexpected request: ${method} ${url}`)
+  })
+}
+
+describe('putCampaignFile with a large file', () => {
+  it('commits through the Git Data API and returns the new blob sha', async () => {
+    const fetchMock = gitDataMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const sha = await putCampaignFile({ ...SRC, sha: 'old1' }, BIG, 'msg', 'tok')
+    expect(sha).toBe('blob1')
+
+    const urls = fetchMock.mock.calls.map(c => c[0] as string)
+    // Nothing goes through the Contents write path
+    expect(urls.some(u => u.includes('/contents/') && !u.includes('?ref='))).toBe(false)
+    expect(urls.some(u => u.includes('/git/blobs'))).toBe(true)
+
+    const commitCall = fetchMock.mock.calls.find(
+      c => (c[0] as string).endsWith('/git/commits') && (c[1] as RequestInit).method === 'POST'
+    )!
+    const commitBody = JSON.parse((commitCall[1] as RequestInit).body as string)
+    expect(commitBody.message).toBe('msg')
+    expect(commitBody.parents).toEqual(['head1'])
+    expect(commitBody.tree).toBe('tree1')
+
+    const refCall = fetchMock.mock.calls.find(c => (c[1] as RequestInit).method === 'PATCH')!
+    expect(refCall[0]).toContain('/git/refs/heads/main')
+    expect(JSON.parse((refCall[1] as RequestInit).body as string).sha).toBe('commit1')
+  })
+
+  it('refuses to overwrite a file that moved on since the pull', async () => {
+    vi.stubGlobal('fetch', gitDataMock({ '/contents/': () => jsonResponse({ sha: 'moved' }) }))
+    await expect(putCampaignFile({ ...SRC, sha: 'old1' }, BIG, 'm', 'tok'))
+      .rejects.toMatchObject({ kind: 'conflict' })
+  })
+
+  it('creates the file when it isn\'t there yet', async () => {
+    vi.stubGlobal('fetch', gitDataMock({ '/contents/': () => jsonResponse({ message: 'Not Found' }, 404) }))
+    await expect(putCampaignFile(SRC, BIG, 'm', 'tok')).resolves.toBe('blob1')
+  })
+
+  it('reports a non-fast-forward ref update as a conflict', async () => {
+    vi.stubGlobal('fetch', gitDataMock({
+      '/git/refs/heads/': () => jsonResponse({ message: 'Update is not a fast forward' }, 422),
+    }))
+    await expect(putCampaignFile({ ...SRC, sha: 'old1' }, BIG, 'm', 'tok'))
+      .rejects.toMatchObject({ kind: 'conflict' })
+  })
+
+  it('keeps slashes in a branch name when addressing the ref', async () => {
+    const fetchMock = gitDataMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await putCampaignFile({ ...SRC, ref: 'fix/improve-labels', sha: 'old1' }, BIG, 'm', 'tok')
+    const urls = fetchMock.mock.calls.map(c => c[0] as string)
+    expect(urls.some(u => u.includes('/git/ref/heads/fix/improve-labels'))).toBe(true)
+  })
 })

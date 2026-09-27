@@ -113,6 +113,17 @@
           <a :href="webUrl" target="_blank" rel="noopener" class="link-out">view on GitHub ↗</a>
         </div>
 
+        <div v-if="githubStore.canPush" class="field-row">
+          <input
+            v-model="commitMessage"
+            type="text"
+            class="text-input"
+            :placeholder="defaultCommitMessage"
+            spellcheck="false"
+            @keyup.enter="doPush"
+          />
+        </div>
+
         <div class="field-row">
           <button class="btn-secondary" :disabled="githubStore.isBusy" @click="doPull">
             {{ githubStore.status === 'pulling' ? 'Pulling…' : 'Pull' }}
@@ -164,6 +175,10 @@ const connecting = ref(false)
 const overwriteLocal = ref(false)
 const successText = ref('')
 
+/** Empty means "use the generated subject", which the placeholder shows. */
+const commitMessage = ref('')
+const defaultCommitMessage = computed(() => githubStore.defaultMessage())
+
 // ── Browsing ────────────────────────────────────────────────────────────────
 
 const repoInput = ref(githubStore.source ? `${githubStore.source.owner}/${githubStore.source.repo}` : '')
@@ -188,6 +203,7 @@ const sourceSpec = ref(githubStore.source ? formatSourceSpec(githubStore.source)
 watch(() => githubStore.source, (src) => {
   sourceSpec.value = src ? formatSourceSpec(src) : ''
   repoInput.value = src ? `${src.owner}/${src.repo}` : ''
+  commitMessage.value = ''
   successText.value = ''
 })
 
@@ -340,7 +356,8 @@ function afterPull() {
 async function doPush() {
   successText.value = ''
   try {
-    await githubStore.push()
+    await githubStore.push(commitMessage.value.trim() || undefined)
+    commitMessage.value = ''
     successText.value = 'Pushed to GitHub.'
   } catch { /* githubStore.error carries the message */ }
 }

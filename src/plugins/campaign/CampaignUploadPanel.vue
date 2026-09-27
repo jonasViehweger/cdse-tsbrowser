@@ -27,6 +27,7 @@ import { ref } from 'vue'
 import { useAppStore } from '../../stores/app'
 import { useCampaignStore } from '../../stores/campaign'
 import type { CampaignGeoJSON } from '../../types/campaign'
+import { stringifyCampaign } from '../../utils/campaignJson'
 
 const appStore = useAppStore()
 const campaignStore = useCampaignStore()
@@ -74,7 +75,7 @@ function onFileChange(evt: Event) {
 
 function doExport() {
   const geojson = campaignStore.exportGeoJSON(appStore.startDate, appStore.endDate)
-  const json = JSON.stringify(geojson, null, 2)
+  const json = stringifyCampaign(geojson)
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

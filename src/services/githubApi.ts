@@ -18,7 +18,24 @@ const API_VERSION = '2022-11-28'
 /** Contents API refuses to inline a file above this size; the blob API handles it. */
 const CONTENTS_INLINE_LIMIT = 1024 * 1024
 
-export type GithubErrorKind = 'auth' | 'notfound' | 'conflict' | 'ratelimit' | 'network' | 'other'
+/**
+ * Base64 payload above which a write goes the long way round.
+ *
+ * The Contents API is a convenience wrapper over a blob-tree-commit-ref
+ * sequence, and it stops answering once the encoded body gets large — a
+ * multi-megabyte PUT comes back as a bare 404, indistinguishable from a
+ * repository that isn't there. The Git Data API has no such ceiling.
+ */
+const CONTENTS_WRITE_LIMIT = 1024 * 1024
+
+export type GithubErrorKind =
+  | 'auth'
+  | 'notfound'
+  | 'conflict'
+  | 'invalid'
+  | 'ratelimit'
+  | 'network'
+  | 'other'
 
 export class GithubError extends Error {
   constructor(
@@ -107,6 +124,11 @@ async function request(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
+/** Append GitHub's own wording, so the real cause survives our paraphrase. */
+function withDetail(message: string, detail: string): string {
+  return detail ? `${message} GitHub said: ${detail}` : message
+}
+
 /** Turn a failed response into a GithubError with a message worth showing a user. */
 async function toError(res: Response, where: string, authed: boolean): Promise<GithubError> {
   let detail = ''
@@ -129,27 +151,49 @@ async function toError(res: Response, where: string, authed: boolean): Promise<G
       403,
     )
   }
+  // Fine-grained tokens get told what they were missing, in a header. It is the
+  // only thing that separates "no write access" from "no such repository",
+  // because GitHub deliberately answers both with 404.
+  const needed = res.headers.get('x-accepted-github-permissions')
+  const permissionHint = needed ? ` The token needs: ${needed}.` : ''
+
   if (res.status === 403) {
     return new GithubError(
-      detail || 'GitHub denied the request — the token may lack Contents write access to this repository.',
+      (detail || 'GitHub denied the request — the token may lack Contents write access to this repository.') + permissionHint,
       'auth',
       403,
     )
   }
   if (res.status === 404) {
+    // On a write this is more often a token without Contents write access than
+    // a wrong path — GitHub says 404 rather than 403 so as not to confirm that
+    // a repository the caller can't write to exists at all.
     return new GithubError(
-      authed
-        ? `Not found: ${where}. Check the path and ref, and that the token can see this repository.`
-        : `Not found: ${where}. If the repository is private, connect a token first.`,
+      withDetail(
+        authed
+          ? `Not found: ${where}. Check the path and branch, and that the token has Contents: read and write on this repository.${permissionHint}`
+          : `Not found: ${where}. If the repository is private, connect a token first.`,
+        detail,
+      ),
       'notfound',
       404,
     )
   }
-  if (res.status === 409 || res.status === 422) {
+  if (res.status === 409) {
     return new GithubError(
-      detail || 'The file changed on GitHub since it was last pulled.',
+      withDetail('The file changed on GitHub since it was last pulled.', detail),
       'conflict',
-      res.status,
+      409,
+    )
+  }
+  if (res.status === 422) {
+    // Validation, not concurrency: a missing sha, a ref GitHub won't accept, a
+    // file too large for this endpoint. GitHub says which; repeating its words
+    // beats guessing, because every guess here sends the user somewhere wrong.
+    return new GithubError(
+      withDetail('GitHub rejected the request.', detail),
+      'invalid',
+      422,
     )
   }
   return new GithubError(detail || `GitHub request failed (HTTP ${res.status}).`, 'other', res.status)
@@ -213,6 +257,10 @@ export async function fetchCampaignFile(src: GithubSource, token?: string): Prom
  * the file has moved on since, which surfaces as a `conflict` error rather than
  * a lost commit. Omit it only when creating the file for the first time.
  *
+ * A campaign of a few thousand labelled points outgrows the Contents API write
+ * path, so those commits are assembled by hand through the Git Data API — see
+ * {@link CONTENTS_WRITE_LIMIT}.
+ *
  * Returns the new blob sha.
  */
 export async function putCampaignFile(
@@ -221,6 +269,11 @@ export async function putCampaignFile(
   message: string,
   token: string,
 ): Promise<string> {
+  const content = encodeBase64(text)
+  if (content.length > CONTENTS_WRITE_LIMIT) {
+    return commitViaGitData(src, content, message, token)
+  }
+
   const url = `${API_BASE}/repos/${src.owner}/${src.repo}/contents/${encodePath(src.path)}`
 
   const res = await request(url, {
@@ -228,7 +281,7 @@ export async function putCampaignFile(
     headers: { ...headers(token) as Record<string, string>, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message,
-      content: encodeBase64(text),
+      content,
       ...(src.sha ? { sha: src.sha } : {}),
       ...(src.ref ? { branch: src.ref } : {}),
     }),
@@ -240,6 +293,113 @@ export async function putCampaignFile(
   const sha = body.content?.sha
   if (!sha) throw new GithubError('GitHub accepted the commit but returned no sha.', 'other', res.status)
   return sha
+}
+
+// ── Git Data API write path ──────────────────────────────────────────────────
+
+async function getJson<T>(url: string, token: string, where: string): Promise<T> {
+  const res = await request(url, { headers: headers(token) })
+  if (!res.ok) throw await toError(res, where, true)
+  return await res.json() as T
+}
+
+async function sendJson<T>(
+  url: string,
+  token: string,
+  body: unknown,
+  where: string,
+  method = 'POST',
+): Promise<T> {
+  const res = await request(url, {
+    method,
+    headers: { ...headers(token) as Record<string, string>, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await toError(res, where, true)
+  return await res.json() as T
+}
+
+/** Blob sha currently at the path on a ref, or null when the file isn't there yet. */
+async function remoteBlobSha(src: GithubSource, ref: string, token: string): Promise<string | null> {
+  const url = `${API_BASE}/repos/${src.owner}/${src.repo}/contents/${encodePath(src.path)}?ref=${encodeURIComponent(ref)}`
+  const res = await request(url, { headers: headers(token) })
+  if (res.status === 404) return null
+  if (!res.ok) throw await toError(res, fileLabel(src), true)
+  const body = await res.json() as { sha?: string }
+  return body.sha ?? null
+}
+
+/**
+ * Commit one file by building the objects the Contents API would have built:
+ * blob, tree on top of the branch head, commit, then move the branch.
+ *
+ * The concurrency guarantee is kept by hand — the Contents API gets it from the
+ * `sha` field, here it is a read of the current blob sha before anything is
+ * written. Returns the new blob sha, as the Contents path does.
+ */
+async function commitViaGitData(
+  src: GithubSource,
+  content: string,
+  message: string,
+  token: string,
+): Promise<string> {
+  const repoUrl = `${API_BASE}/repos/${src.owner}/${src.repo}`
+  const branch = src.ref ?? await fetchDefaultBranch(src, token)
+  const branchLabel = `branch ${branch} of ${src.owner}/${src.repo}`
+
+  const current = await remoteBlobSha(src, branch, token)
+  if (src.sha && current && current !== src.sha) {
+    throw new GithubError('The file changed on GitHub since it was last pulled.', 'conflict', 409)
+  }
+
+  // Refs keep their slashes; only the segments need escaping.
+  const ref = await getJson<{ object: { sha: string } }>(
+    `${repoUrl}/git/ref/heads/${encodePath(branch)}`, token, branchLabel,
+  )
+  const head = ref.object.sha
+
+  const headCommit = await getJson<{ tree: { sha: string } }>(
+    `${repoUrl}/git/commits/${head}`, token, branchLabel,
+  )
+
+  const blob = await sendJson<{ sha: string }>(
+    `${repoUrl}/git/blobs`, token, { content, encoding: 'base64' }, fileLabel(src),
+  )
+
+  const tree = await sendJson<{ sha: string }>(
+    `${repoUrl}/git/trees`, token,
+    {
+      base_tree: headCommit.tree.sha,
+      tree: [{ path: src.path, mode: '100644', type: 'blob', sha: blob.sha }],
+    },
+    fileLabel(src),
+  )
+
+  const commit = await sendJson<{ sha: string }>(
+    `${repoUrl}/git/commits`, token,
+    { message, tree: tree.sha, parents: [head] },
+    fileLabel(src),
+  )
+
+  try {
+    await sendJson(
+      `${repoUrl}/git/refs/heads/${encodePath(branch)}`, token,
+      { sha: commit.sha }, branchLabel, 'PATCH',
+    )
+  } catch (e) {
+    // Not a fast-forward: someone committed to the branch while this one was
+    // being assembled, which is the same story as a stale blob sha.
+    if (e instanceof GithubError && e.status === 422) {
+      throw new GithubError(
+        `The ${branch} branch moved on while pushing. Pull first, then push again.`,
+        'conflict',
+        409,
+      )
+    }
+    throw e
+  }
+
+  return blob.sha
 }
 
 /** Validate a token and return the account login it belongs to. */

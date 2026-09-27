@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { CampaignParams, CampaignField, CampaignFeature, CampaignGeoJSON, SampleRecord } from '../types/campaign'
+import type { Flags } from '../types/state'
 import { saveCampaignFeatures, loadCampaignFeatures, saveCampaignRecords, loadCampaignRecords, saveCampaignSchema, loadCampaignSchema } from '../utils/campaignIdb'
 import { deepEqual } from '../utils/url'
 import { useAppStore } from './app'
@@ -263,17 +264,33 @@ export const useCampaignStore = defineStore('campaign', () => {
     return record
   }
 
+  /**
+   * Flags in date order, as the generating script writes them.
+   *
+   * The editor adds them in whatever order they were clicked, and ISO dates
+   * sort lexically, so this is the same ordering `dict(sorted(flags.items()))`
+   * produces on the Python side.
+   */
+  function sortFlags(flags: Flags): Flags {
+    return Object.fromEntries(
+      Object.entries(flags).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    )
+  }
+
   function exportGeoJSON(startDate: string, endDate: string): CampaignGeoJSON {
     const camp = schema.value!
     const exportedFeatures: CampaignFeature[] = features.value.map(feat => {
       const record = sampleRecords.value[feat.properties.sample_id] ?? {}
+      // Spreading the file's properties first keeps their original order:
+      // overwriting a key leaves it where it was, so only genuinely new keys
+      // land at the end. Campaign files are diffed in git — reordering the
+      // properties of every sample would drown the labels that changed.
+      const properties = { ...feat.properties, ...record }
+      if (properties.flags) properties.flags = sortFlags(properties.flags)
       return {
         type: 'Feature',
         geometry: feat.geometry,
-        properties: {
-          ...feat.properties,
-          ...record,
-        },
+        properties,
       }
     })
     return {

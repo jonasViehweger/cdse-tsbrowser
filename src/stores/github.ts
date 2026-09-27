@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import type { CampaignGeoJSON, GithubSource } from '../types/campaign'
 import { fetchCampaignFile, putCampaignFile, fetchLogin, GithubError } from '../services/githubApi'
 import { saveCampaignSource, loadCampaignSource } from '../utils/campaignIdb'
+import { stringifyCampaign } from '../utils/campaignJson'
 import { useCampaignStore } from './campaign'
 import { useAppStore } from './app'
 
@@ -183,7 +184,7 @@ export const useGithubStore = defineStore('github', () => {
     error.value = null
     try {
       const geojson = campaignStore.exportGeoJSON(appStore.startDate, appStore.endDate)
-      const text = JSON.stringify(geojson, null, 2) + '\n'
+      const text = stringifyCampaign(geojson)
 
       // Capture before the request: labelling can continue while it's in flight,
       // and that later work is genuinely unpushed.
@@ -204,6 +205,7 @@ export const useGithubStore = defineStore('github', () => {
     }
   }
 
+  /** Commit subject used when the user doesn't write one. */
   function defaultMessage(): string {
     const name = campaignStore.schema?.name ?? 'campaign'
     const total = campaignStore.features.length
@@ -275,6 +277,7 @@ export const useGithubStore = defineStore('github', () => {
     pull,
     refresh,
     push,
+    defaultMessage,
     restoreSource,
     clearSource,
   }
