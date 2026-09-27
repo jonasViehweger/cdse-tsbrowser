@@ -9,6 +9,14 @@
       ↗
     </button>
     <button
+      v-if="canDownload"
+      class="action-btn"
+      title="Download displayed data as CSV"
+      @click="handleDownload"
+    >
+      ↓
+    </button>
+    <button
       class="action-btn"
       :disabled="!canOpenSettings"
       :title="canOpenSettings ? undefined : 'No settings for this panel'"
@@ -36,9 +44,16 @@ const props = defineProps<{
 
 const settingsStore = usePanelSettingsStore()
 
+const activePanelId = computed(() => props.params?.activePanel?.id)
+
 const canOpenSettings = computed(() => {
-  const id = props.params?.activePanel?.id
-  return !!id && settingsStore.hasSettings(id)
+  const id = activePanelId.value
+  return !!id && settingsStore.has(id, 'settings')
+})
+
+const canDownload = computed(() => {
+  const id = activePanelId.value
+  return !!id && settingsStore.has(id, 'download')
 })
 
 const isPopout = computed(() =>
@@ -46,8 +61,13 @@ const isPopout = computed(() =>
 )
 
 function handleSettings() {
-  const id = props.params?.activePanel?.id
-  if (id) settingsStore.openFor(id)
+  const id = activePanelId.value
+  if (id) settingsStore.run(id, 'settings')
+}
+
+function handleDownload() {
+  const id = activePanelId.value
+  if (id) settingsStore.run(id, 'download')
 }
 
 function handlePopout() {

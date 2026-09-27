@@ -38,12 +38,14 @@ import {
 } from '../../services/waybackApi'
 import { basemapUrl } from '../../utils/basemap'
 import { buildPixelPolygon } from '../../utils/geometry'
+import { useMapPointPicker } from '../../composables/useMapPointPicker'
 
 const props = defineProps<{
   params?: { params?: Record<string, unknown>; api?: { updateParameters(p: Record<string, unknown>): void } }
 }>()
 
 const appStore = useAppStore()
+const pointPicker = useMapPointPicker()
 
 const mapEl = ref<HTMLDivElement | null>(null)
 /** Only releases whose date has arrived, deduplicated, newest acquisition first. */
@@ -79,6 +81,7 @@ function initMap() {
     buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression),
     { color: '#ffff00', fillOpacity: 0, weight: 2 },
   ).addTo(map)
+  pointPicker.attach(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
 }
@@ -200,12 +203,13 @@ watch(() => appStore.coordinate, loadReleases, { deep: true })
 // Swap basemap when theme changes
 watch(() => appStore.theme, () => { basemap?.setUrl(basemapUrl()) })
 
-// Update marker position when coordinate changes
+// Update marker position when coordinate changes. Recentring is limited to
+// off-screen points so a pick inside the view leaves the map where it is.
 watch(
   () => appStore.coordinate,
   ([lon, lat]) => {
     marker?.setLatLngs(buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression))
-    map?.panTo([lat, lon])
+    if (map && !map.getBounds().contains([lat, lon])) map.panTo([lat, lon])
   },
 )
 

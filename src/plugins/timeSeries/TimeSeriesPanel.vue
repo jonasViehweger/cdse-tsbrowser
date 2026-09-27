@@ -107,6 +107,7 @@ import {
   type YMode,
 } from './useTimeSeriesConfig'
 import { computeRobustRange } from '../../utils/chartData'
+import { buildTimeSeriesCsv, downloadCsv, timeSeriesCsvFilename } from '../../utils/csv'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 
@@ -206,7 +207,9 @@ const panelId = computed(() => panelApi()?.id ?? '')
 
 watch(panelId, (id, oldId) => {
   if (oldId) settingsStore.unregister(oldId)
-  if (id) settingsStore.register(id, openSettings)
+  if (!id) return
+  settingsStore.register(id, 'settings', openSettings)
+  settingsStore.register(id, 'download', downloadData)
 }, { immediate: true })
 
 onUnmounted(() => {
@@ -278,6 +281,17 @@ const flagLabels = computed(() => appStore.flagLabels)
 
 function onPointClick(date: string) {
   appStore.setSelectedDate(date)
+}
+
+function downloadData() {
+  const csv = buildTimeSeriesCsv(data.value, dataSource.value?.unit || 'value')
+  const filename = timeSeriesCsvFilename(
+    dataSource.value?.name ?? 'timeseries',
+    appStore.coordinate,
+    appStore.startDate,
+    appStore.endDate,
+  )
+  downloadCsv(filename, csv)
 }
 </script>
 

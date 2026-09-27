@@ -1,0 +1,49 @@
+/*
+ * Styling for the map point picker control (see composables/useMapPointPicker).
+ * Global rather than scoped: the control's DOM is created by Leaflet, so it
+ * never carries a component's scope attribute.
+ */
+
+.map-pick-control {
+  /* Revealed on map hover — the imagery stays uncluttered otherwise. */
+  opacity: 0;
+  transition: opacity 0.12s;
+  border: none;
+}
+
+.leaflet-container:hover .map-pick-control,
+.map-pick-control:focus-within,
+.leaflet-container.map-picking .map-pick-control {
+  opacity: 1;
+}
+
+.map-pick-btn.map-pick-btn {
+  /* Doubled class: out-specifies leaflet-bar's own `a` rules. */
+  background: var(--bg-panel);
+  border: 1px solid var(--border-mid);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 26px;
+  width: 28px;
+  height: 28px;
+  text-align: center;
+}
+
+.map-pick-btn.map-pick-btn:hover {
+  background: var(--bg-hover);
+}
+
+.map-pick-btn.is-armed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+/* Armed: crosshair over the whole map. Leaflet puts its grab cursor on the
+   drag pane, so the container rule alone is not enough. */
+.leaflet-container.map-picking,
+.leaflet-container.map-picking .leaflet-grab,
+.leaflet-container.map-picking .leaflet-interactive {
+  cursor: crosshair;
+}
