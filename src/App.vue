@@ -35,6 +35,7 @@ import HomeView from './views/HomeView.vue'
 import { useAppStore } from './stores/app'
 import { useLayoutStore } from './stores/layout'
 import { useCampaignStore } from './stores/campaign'
+import { useGithubStore } from './stores/github'
 import { parseUrl, serialiseUrl } from './utils/url'
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts'
 import type { CampaignField } from './types/campaign'
@@ -52,6 +53,7 @@ const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? theme
 const popoutUrl = `${import.meta.env.BASE_URL}popout.html`
 const layoutStore = useLayoutStore()
 const campaignStore = useCampaignStore()
+const githubStore = useGithubStore()
 const showSettings = ref(false)
 const showShortcuts = ref(false)
 
@@ -60,7 +62,7 @@ useKeyboardShortcuts(() => { showShortcuts.value = !showShortcuts.value })
 // Parse URL synchronously during setup, before watchEffect first fires.
 // Campaign data was already loaded from IDB (or ephemerally) by main.ts before mount.
 const parsed = parseUrl(window.location.search)
-const showHome = parsed.lon == null && parsed.lat == null && !parsed.schema?.campaign
+const showHome = parsed.lon == null && parsed.lat == null && !parsed.schema?.campaign && !parsed.github
 if (parsed.lon != null && parsed.lat != null) {
   appStore.setCoordinate(parsed.lon, parsed.lat)
 }
@@ -123,6 +125,7 @@ watchEffect(() => {
     selected: appStore.selectedDate,
     sample:   Object.keys(sampleObj).length ? sampleObj : undefined,
     schema:   schemaObj,
+    github:   githubStore.source,
   })
   history.replaceState(null, '', url)
 })

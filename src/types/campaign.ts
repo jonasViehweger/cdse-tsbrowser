@@ -40,6 +40,22 @@ export interface CampaignFeature {
   }
 }
 
+/**
+ * Where a campaign file lives on GitHub.
+ *
+ * `ref` is optional — omitted means the repository's default branch, for both
+ * reads and writes. `sha` is the blob sha of the last fetch and is what the
+ * Contents API uses for optimistic concurrency on write; it is deliberately
+ * never serialised into share URLs.
+ */
+export interface GithubSource {
+  owner: string
+  repo: string
+  path: string
+  ref?: string
+  sha?: string
+}
+
 /** Full campaign GeoJSON (top-level `campaign` key + features). */
 export interface CampaignGeoJSON {
   type: 'FeatureCollection'

@@ -70,6 +70,33 @@ describe('schema round-trip', () => {
   })
 })
 
+describe('github source round-trip', () => {
+  it('serialises and parses a source with a ref', () => {
+    const url = serialiseUrl({ ...BASE, github: { owner: 'acme', repo: 'campaigns', ref: 'main', path: 'forest.geojson' } })
+    expect(parseUrl(url).github).toEqual({ owner: 'acme', repo: 'campaigns', ref: 'main', path: 'forest.geojson' })
+  })
+
+  it('serialises and parses a source without a ref', () => {
+    const url = serialiseUrl({ ...BASE, github: { owner: 'acme', repo: 'campaigns', path: 'forest.geojson' } })
+    expect(parseUrl(url).github).toEqual({ owner: 'acme', repo: 'campaigns', path: 'forest.geojson' })
+  })
+
+  it('never leaks the blob sha into the URL', () => {
+    const url = serialiseUrl({ ...BASE, github: { owner: 'a', repo: 'b', path: 'c.geojson', sha: 'deadbeef' } })
+    expect(url).not.toContain('deadbeef')
+    expect(parseUrl(url).github?.sha).toBeUndefined()
+  })
+
+  it('omits the gh param when there is no source', () => {
+    expect(serialiseUrl({ ...BASE, github: null })).not.toContain('gh=')
+    expect(serialiseUrl({ ...BASE })).not.toContain('gh=')
+  })
+
+  it('ignores a malformed gh param instead of throwing', () => {
+    expect(parseUrl('?gh=nonsense').github).toBeUndefined()
+  })
+})
+
 // ── deepEqual ─────────────────────────────────────────────────────────────────
 
 describe('deepEqual', () => {

@@ -1,7 +1,7 @@
-import type { CampaignFeature, CampaignParams, SampleRecord } from '../types/campaign'
+import type { CampaignFeature, CampaignParams, GithubSource, SampleRecord } from '../types/campaign'
 
 const DB_NAME = 'cdse-tsbrowser'
-const DB_VERSION = 3  // bumped to add campaign-schemas store
+const DB_VERSION = 4  // bumped to add campaign-sources store
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -16,6 +16,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('campaign-schemas')) {
         db.createObjectStore('campaign-schemas')
+      }
+      if (!db.objectStoreNames.contains('campaign-sources')) {
+        db.createObjectStore('campaign-sources')
       }
     }
     req.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result)
@@ -51,6 +54,30 @@ export async function listCampaignNames(): Promise<string[]> {
     const tx = db.transaction('campaign-schemas', 'readonly')
     const req = tx.objectStore('campaign-schemas').getAllKeys()
     req.onsuccess = () => { db.close(); resolve(req.result as string[]) }
+    req.onerror  = () => { db.close(); reject(req.error) }
+  })
+}
+
+// ── Sources (where a campaign came from) ─────────────────────────────────────
+
+export async function saveCampaignSource(name: string, source: GithubSource): Promise<void> {
+  // Strip Vue reactive proxies so structured clone doesn't throw
+  const plain = JSON.parse(JSON.stringify(source)) as GithubSource
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('campaign-sources', 'readwrite')
+    tx.objectStore('campaign-sources').put(plain, name)
+    tx.oncomplete = () => { db.close(); resolve() }
+    tx.onerror   = () => { db.close(); reject(tx.error) }
+  })
+}
+
+export async function loadCampaignSource(name: string): Promise<GithubSource | null> {
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('campaign-sources', 'readonly')
+    const req = tx.objectStore('campaign-sources').get(name)
+    req.onsuccess = () => { db.close(); resolve((req.result as GithubSource) ?? null) }
     req.onerror  = () => { db.close(); reject(req.error) }
   })
 }

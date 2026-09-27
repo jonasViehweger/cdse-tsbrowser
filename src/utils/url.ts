@@ -1,5 +1,6 @@
 import type { Flags, FlagLabels } from '../types/state'
-import type { CampaignField } from '../types/campaign'
+import type { CampaignField, GithubSource } from '../types/campaign'
+import { parseSourceSpec, formatSourceSpec } from '../services/githubApi'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,11 @@ export interface ParsedUrl {
    * self-contained and shareable without IDB access.
    */
   schema: ParsedSchema | undefined
+  /**
+   * GitHub campaign file to load on startup, as `owner/repo[@ref]:path`.
+   * Takes precedence over IDB: the file is the shared source of truth.
+   */
+  github: GithubSource | undefined
 }
 
 export interface SerialiseInput {
@@ -40,6 +46,7 @@ export interface SerialiseInput {
   selected: string | null
   sample?: ParsedSample
   schema?: ParsedSchema
+  github?: GithubSource | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -94,7 +101,10 @@ export function parseUrl(search: string): ParsedUrl {
     try { schema = JSON.parse(rawSchema) as ParsedSchema } catch { /* ignore */ }
   }
 
-  return { lon, lat, start, end, selected, sample, schema }
+  const rawGithub = p.get('gh')
+  const github = rawGithub ? parseSourceSpec(rawGithub) ?? undefined : undefined
+
+  return { lon, lat, start, end, selected, sample, schema, github }
 }
 
 // ── Serialisation ─────────────────────────────────────────────────────────────
@@ -123,6 +133,8 @@ export function serialiseUrl(state: SerialiseInput): string {
   if (state.schema && hasContent(state.schema)) {
     p.set('schema', JSON.stringify(state.schema))
   }
+
+  if (state.github) p.set('gh', formatSourceSpec(state.github))
 
   return '?' + p.toString()
 }

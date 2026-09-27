@@ -54,7 +54,9 @@
         ]
       },
       "properties": {
-        "sample_id": 1
+        "sample_id": 1,
+        "confidence": "High",
+        "interpreter": "vij"
       }
     }
   ]
