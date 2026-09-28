@@ -4,8 +4,9 @@ import { useAppStore } from '../stores/app'
 /** Returns true when keyboard focus is inside a text-entry element.
  *  All shortcuts are suppressed in this case so users can type freely. */
 function isFocusInInput(): boolean {
-  const tag = (document.activeElement as HTMLElement | null)?.tagName?.toLowerCase()
-  return tag === 'input' || tag === 'textarea' || tag === 'select'
+  const el = document.activeElement as HTMLElement | null
+  const tag = el?.tagName?.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el?.isContentEditable
 }
 
 /** Find the closest date in `dates` to `target` (ISO string). */
@@ -44,16 +45,13 @@ export function useKeyboardShortcuts(onToggleHelp: () => void) {
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    // ? always opens help, even from inputs
-    if (e.key === '?') {
-      e.preventDefault()
-      onToggleHelp()
-      return
-    }
-
     if (isFocusInInput()) return
 
     switch (e.key) {
+      case '?':
+        e.preventDefault()
+        onToggleHelp()
+        break
       case 'ArrowLeft':
         e.preventDefault()
         navigate(-1)

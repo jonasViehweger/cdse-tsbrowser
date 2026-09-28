@@ -8,7 +8,7 @@
       <div class="modal-body">
         <table class="shortcuts-table">
           <tbody>
-            <tr v-for="s in shortcuts" :key="s.key">
+            <tr v-for="s in shortcuts" :key="s.description">
               <td class="key-cell">
                 <kbd v-for="k in s.keys" :key="k" class="key">{{ k }}</kbd>
               </td>

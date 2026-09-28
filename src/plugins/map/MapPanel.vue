@@ -83,7 +83,7 @@ function wmsUrl(instanceId: string) {
 }
 
 function wmsParams(): { layers: string } & Record<string, string | boolean> {
-  const time = timeParam(selectedDate.value)
+  const time = timeParam(mapDate.value)
   return {
     layers: activeLayer.value,
     format: 'image/jpeg',
@@ -114,6 +114,8 @@ function refreshWmsParams() {
 
 const coordinate = computed(() => appStore.coordinate)
 const selectedDate = computed(() => appStore.selectedDate)
+/** The date the map shows: selectedDate, debounced. */
+const mapDate = ref(selectedDate.value)
 
 function timeParam(date: string | null): string {
   if (!date) return ''
@@ -220,9 +222,17 @@ watch(() => authStore.isAuthenticated, (authenticated) => {
   if (authenticated && status.value === 'idle') setup()
 })
 
-// Update WMS TIME when selected date changes
+// Update WMS TIME when the selected date settles. Stepping through dates with
+// held or rapidly pressed arrow keys would otherwise request every one of them.
+const DATE_DEBOUNCE_MS = 300
+let dateTimer: ReturnType<typeof setTimeout> | undefined
+
 watch(selectedDate, (date) => {
-  if (timeParam(date)) refreshWmsParams()
+  clearTimeout(dateTimer)
+  dateTimer = setTimeout(() => {
+    mapDate.value = date
+    if (timeParam(date)) refreshWmsParams()
+  }, DATE_DEBOUNCE_MS)
 })
 
 // Persist and apply layer change
@@ -257,6 +267,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearTimeout(dateTimer)
   resizeObserver?.disconnect()
   map?.remove()
   map = null
