@@ -10,11 +10,16 @@ vi.mock('./auth', () => ({ getValidToken: () => Promise.resolve('test-token') })
 
 const BANDS = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12', 'SCL'] as const
 
-/** Build a minimal successful BandStatsEntry fixture for one date. */
+/**
+ * Build a minimal successful BandStatsEntry fixture for one date. Values are
+ * given as reflectances and encoded as DN, the way the evalscript returns them.
+ */
 function makeEntry(date: string, bandValues: Partial<Record<string, number>> = {}): RawBandsResponse['data'][0] {
   const outputs: BandStatsOutputs = {}
   for (const b of BANDS) {
-    outputs[b] = { bands: { B0: { stats: { mean: bandValues[b] ?? 0.1, sampleCount: 1, noDataCount: 0 } } } }
+    const value = bandValues[b] ?? 0.1
+    const mean = b === 'SCL' ? value : Math.round(value * 10000)
+    outputs[b] = { bands: { B0: { stats: { mean, sampleCount: 1, noDataCount: 0 } } } }
   }
   return {
     interval: { from: `${date}T00:00:00Z`, to: `${date}T23:59:59Z` },
@@ -52,6 +57,15 @@ describe('parseRawBandsResponse', () => {
     })
     expect(series['2025-06-15'].B08).toBeCloseTo(0.35)
     expect(series['2025-06-15'].B04).toBeCloseTo(0.12)
+  })
+
+  it('scales DN back to reflectance but leaves SCL class values untouched', () => {
+    const entry = makeEntry('2025-06-15')
+    outputsOf(entry)['B08'].bands.B0.stats.mean = 3512
+    outputsOf(entry)['SCL'].bands.B0.stats.mean = 4
+    const { series } = parseRawBandsResponse({ data: [entry] })
+    expect(series['2025-06-15'].B08).toBe(0.3512)
+    expect(series['2025-06-15'].SCL).toBe(4)
   })
 
   it('converts NaN mean to null', () => {

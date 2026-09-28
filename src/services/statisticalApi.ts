@@ -6,33 +6,39 @@ const STATISTICS_ENDPOINT = `${import.meta.env.VITE_API_BASE}/api/v1/statistics`
 
 const BAND_NAMES = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12', 'SCL'] as const
 
+// L2A reflectance is stored as UINT16 DN / 10000, so the DN is lossless.
+const REFLECTANCE_SCALE = 10000
+
 // Single evalscript — all raw bands including SCL are always fetched.
 // Cloud masking is applied client-side using the SCL band values.
+// Outputs are integers because FLOAT32 output doubles the processing units:
+// reflectances go out as DN (scaled back in parseRawBandsResponse).
 const EVALSCRIPT_RAW = `//VERSION=3
 function setup() {
   return {
     input: [{ bands: ["B02","B03","B04","B05","B06","B07","B08","B8A","B11","B12","SCL","dataMask"] }],
     output: [
-      { id: "B02", bands: 1, sampleType: "FLOAT32" },
-      { id: "B03", bands: 1, sampleType: "FLOAT32" },
-      { id: "B04", bands: 1, sampleType: "FLOAT32" },
-      { id: "B05", bands: 1, sampleType: "FLOAT32" },
-      { id: "B06", bands: 1, sampleType: "FLOAT32" },
-      { id: "B07", bands: 1, sampleType: "FLOAT32" },
-      { id: "B08", bands: 1, sampleType: "FLOAT32" },
-      { id: "B8A", bands: 1, sampleType: "FLOAT32" },
-      { id: "B11", bands: 1, sampleType: "FLOAT32" },
-      { id: "B12", bands: 1, sampleType: "FLOAT32" },
-      { id: "SCL", bands: 1, sampleType: "FLOAT32" },
+      { id: "B02", bands: 1, sampleType: "UINT16" },
+      { id: "B03", bands: 1, sampleType: "UINT16" },
+      { id: "B04", bands: 1, sampleType: "UINT16" },
+      { id: "B05", bands: 1, sampleType: "UINT16" },
+      { id: "B06", bands: 1, sampleType: "UINT16" },
+      { id: "B07", bands: 1, sampleType: "UINT16" },
+      { id: "B08", bands: 1, sampleType: "UINT16" },
+      { id: "B8A", bands: 1, sampleType: "UINT16" },
+      { id: "B11", bands: 1, sampleType: "UINT16" },
+      { id: "B12", bands: 1, sampleType: "UINT16" },
+      { id: "SCL", bands: 1, sampleType: "UINT8" },
       { id: "dataMask", bands: 1, sampleType: "UINT8" }
     ]
   }
 }
+function dn(r) { return Math.round(r * ${REFLECTANCE_SCALE}) }
 function evaluatePixel(s) {
   return {
-    B02: [s.B02], B03: [s.B03], B04: [s.B04],
-    B05: [s.B05], B06: [s.B06], B07: [s.B07],
-    B08: [s.B08], B8A: [s.B8A], B11: [s.B11], B12: [s.B12],
+    B02: [dn(s.B02)], B03: [dn(s.B03)], B04: [dn(s.B04)],
+    B05: [dn(s.B05)], B06: [dn(s.B06)], B07: [dn(s.B07)],
+    B08: [dn(s.B08)], B8A: [dn(s.B8A)], B11: [dn(s.B11)], B12: [dn(s.B12)],
     SCL: [s.SCL],
     dataMask: [s.dataMask]
   }
@@ -93,7 +99,8 @@ export function parseRawBandsResponse(json: RawBandsResponse): ParsedRawBands {
     const bands = {} as RawBands
     for (const band of BAND_NAMES) {
       const mean = entry.outputs[band]?.bands?.B0?.stats?.mean
-      bands[band] = mean == null || !isFinite(mean) ? null : mean
+      if (mean == null || !isFinite(mean)) bands[band] = null
+      else bands[band] = band === 'SCL' ? mean : mean / REFLECTANCE_SCALE
     }
     // Only store dates that have at least some valid data
     if (BAND_NAMES.some(b => bands[b] !== null)) {
