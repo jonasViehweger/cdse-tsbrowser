@@ -40,6 +40,7 @@ import { basemapUrl } from '../../utils/basemap'
 import { useMapPointPicker } from '../../composables/useMapPointPicker'
 import { buildPixelPolygon } from '../../utils/geometry'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
+import { SingleImageWms, MAX_WMS_IMAGE_SIZE } from './singleImageWms'
 
 // dockview-vue passes a single `params` prop containing both the user-defined
 // params (under params.params) and the panel API (under params.api).
@@ -72,12 +73,43 @@ const layersStatus = ref<'loading' | 'ready' | 'error'>('loading')
 
 let map: L.Map | null = null
 let basemap: L.TileLayer | null = null
-let wmsLayer: L.TileLayer.WMS | null = null
+let wmsLayer: L.TileLayer.WMS | SingleImageWms | null = null
+let wmsBaseUrl = ''
 let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
 
 function wmsUrl(instanceId: string) {
   return `${import.meta.env.VITE_API_BASE}/ogc/wms/${instanceId}`
+}
+
+function wmsParams(): { layers: string } & Record<string, string | boolean> {
+  const time = timeParam(selectedDate.value)
+  return {
+    layers: activeLayer.value,
+    format: 'image/jpeg',
+    transparent: false,
+    ...(time ? { TIME: time } : {}),
+  }
+}
+
+// Fetch one image for the whole viewport while it fits in a single GetMap
+// request; fall back to tiles for larger panels.
+function syncWmsLayer() {
+  if (!map || !wmsBaseUrl) return
+  const size = map.getSize()
+  const single = size.x <= MAX_WMS_IMAGE_SIZE && size.y <= MAX_WMS_IMAGE_SIZE
+  if (wmsLayer && (wmsLayer instanceof SingleImageWms) === single) return
+
+  wmsLayer?.remove()
+  wmsLayer = single
+    ? new SingleImageWms(wmsBaseUrl, wmsParams())
+    : L.tileLayer.wms(wmsBaseUrl, { ...wmsParams(), version: '1.1.1' } as L.WMSOptions)
+  wmsLayer.addTo(map)
+}
+
+function refreshWmsParams() {
+  if (wmsLayer instanceof SingleImageWms) wmsLayer.setParams(wmsParams())
+  else wmsLayer?.setParams(wmsParams() as L.WMSParams)
 }
 
 const coordinate = computed(() => appStore.coordinate)
@@ -107,15 +139,9 @@ function initMap(instanceId: string) {
 
   basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
 
-  // Sentinel Hub WMS layer
-  const time = timeParam(selectedDate.value)
-  wmsLayer = L.tileLayer.wms(wmsUrl(instanceId), {
-    layers: activeLayer.value,
-    format: 'image/jpeg',
-    version: '1.1.1',
-    transparent: false,
-    ...(time ? { TIME: time } as Record<string, string> : {}),
-  }).addTo(map)
+  wmsBaseUrl = wmsUrl(instanceId)
+  syncWmsLayer()
+  map.on('resize', syncWmsLayer)
 
   // Pixel outline marker — outline only so the centre pixel stays visible.
   // Bright yellow gives high contrast against natural earth tones in satellite imagery.
@@ -196,16 +222,14 @@ watch(() => authStore.isAuthenticated, (authenticated) => {
 
 // Update WMS TIME when selected date changes
 watch(selectedDate, (date) => {
-  if (!wmsLayer) return
-  const time = timeParam(date)
-  if (time) wmsLayer.setParams({ TIME: time })
+  if (timeParam(date)) refreshWmsParams()
 })
 
 // Persist and apply layer change
 watch(activeLayer, (layer) => {
   panelApi()?.updateParameters({ activeLayer: layer })
   layoutStore.saveLayout()
-  if (wmsLayer) wmsLayer.setParams({ layers: layer })
+  refreshWmsParams()
 })
 
 // When dockview restores a layout via fromJSON(), it delivers params after mount.

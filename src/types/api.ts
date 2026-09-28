@@ -12,7 +12,10 @@ export interface RawBands {
   SCL: number | null
 }
 
-export type BandTimeSeries = Record<string, RawBands> // date → bands
+export type BandName = keyof RawBands
+
+/** date → bands. Bands that were not requested are null. */
+export type BandTimeSeries = Record<string, RawBands>
 
 export interface TimeSeriesPoint {
   date: string // ISO date string, e.g. "2020-07-13"
