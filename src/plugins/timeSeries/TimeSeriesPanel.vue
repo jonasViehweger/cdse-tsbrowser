@@ -1,6 +1,9 @@
 <template>
   <div class="ts-panel">
-    <div v-if="error" class="ts-error">{{ error }}</div>
+    <div v-if="error" class="ts-error">
+      <span class="ts-error-message">{{ error }}</span>
+      <button v-if="canRetry" type="button" class="ts-retry" @click="retry">Retry</button>
+    </div>
 
     <div v-if="loading && data.length === 0" class="ts-loading">Loading…</div>
 
@@ -261,7 +264,7 @@ onMounted(() => {
 
 // ── Data & display ──────────────────────────────────────────────────────────
 
-const { data, loading, error } = useTimeSeries(dataSource, maskClouds, validSclClasses)
+const { data, loading, error, canRetry, retry } = useTimeSeries(dataSource, maskClouds, validSclClasses)
 
 // Switching to manual with empty fields: seed them from the range the user is
 // currently looking at, so they adjust rather than guess from scratch.
@@ -335,6 +338,30 @@ function downloadData() {
   font-size: 0.82rem;
   padding: 6px 10px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ts-error-message {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-retry {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 2px 10px;
+}
+
+.ts-retry:hover {
+  background: var(--red);
+  color: var(--bg);
 }
 
 .ts-loading {

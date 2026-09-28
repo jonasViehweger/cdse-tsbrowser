@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   parseRawBandsResponse,
   fetchRawBands,
+  buildEvalscript,
+  readApiError,
+  isRetriableError,
   type BandStatsOutputs,
   type RawBandsResponse,
 } from './statisticalApi'
@@ -111,6 +114,50 @@ describe('parseRawBandsResponse', () => {
     const { failed } = parseRawBandsResponse({ data: [makeFailedEntry('2025-06-15', 'BAD_REQUEST')] })
     expect(failed[0].retriable).toBe(false)
   })
+
+  it('only returns the bands present in the response', () => {
+    const entry = makeEntry('2025-06-15', { B08: 0.3 })
+    for (const b of BANDS) if (b !== 'B08') delete outputsOf(entry)[b]
+    const { series } = parseRawBandsResponse({ data: [entry] })
+    expect(series['2025-06-15']).toEqual({ B08: 0.3 })
+  })
+})
+
+describe('readApiError', () => {
+  const respond = (status: number, body: string) => new Response(body, { status })
+
+  it('reads the message from a Sentinel Hub error body', async () => {
+    const error = await readApiError(respond(429, JSON.stringify({
+      error: { status: 429, reason: 'Too Many Requests', message: 'You have exceeded your rate limit', code: 'RATE_LIMIT_EXCEEDED' },
+    })))
+    expect(error.message).toBe('Statistical API error: You have exceeded your rate limit (HTTP 429)')
+    expect(error.code).toBe('RATE_LIMIT_EXCEEDED')
+    expect(isRetriableError(error)).toBe(true)
+  })
+
+  it('falls back to the raw body when it is not JSON', async () => {
+    const error = await readApiError(respond(502, 'Bad Gateway'))
+    expect(error.message).toBe('Statistical API error: Bad Gateway (HTTP 502)')
+    expect(isRetriableError(error)).toBe(true)
+  })
+
+  it('does not offer a retry for client errors', async () => {
+    const error = await readApiError(respond(400, JSON.stringify({ error: { message: 'Invalid evalscript' } })))
+    expect(error.message).toBe('Statistical API error: Invalid evalscript (HTTP 400)')
+    expect(isRetriableError(error)).toBe(false)
+  })
+})
+
+describe('buildEvalscript', () => {
+  it('reads only the requested bands plus dataMask', () => {
+    const script = buildEvalscript(['B04', 'B08', 'SCL'])
+    expect(script).toContain('input: [{ bands: ["B04","B08","SCL","dataMask"] }]')
+    expect(script).toContain('{ id: "B04", bands: 1, sampleType: "UINT16" }')
+    expect(script).toContain('{ id: "SCL", bands: 1, sampleType: "UINT8" }')
+    expect(script).toContain('B08: [dn(s.B08)]')
+    expect(script).toContain('SCL: [s.SCL]')
+    expect(script).not.toContain('B11')
+  })
 })
 
 describe('fetchRawBands', () => {
@@ -138,7 +185,7 @@ describe('fetchRawBands', () => {
       { data: [makeEntry('2025-06-15', { B08: 0.42 })] }, // the per-interval retry
     ]
 
-    const { series, unresolved } = await fetchRawBands(11, 48, '2025-06-01', '2025-06-30', 'sentinel-2-l2a')
+    const { series, unresolved } = await fetchRawBands(11, 48, '2025-06-01', '2025-06-30', 'sentinel-2-l2a', ['B08'])
 
     expect(Object.keys(series).sort()).toEqual(['2025-06-10', '2025-06-15'])
     expect(series['2025-06-15'].B08).toBeCloseTo(0.42)
@@ -151,7 +198,7 @@ describe('fetchRawBands', () => {
       { data: [makeFailedEntry('2025-06-15')] }, // retry fails too
     ]
 
-    const { series, unresolved } = await fetchRawBands(11, 48, '2025-06-01', '2025-06-30', 'sentinel-2-l2a')
+    const { series, unresolved } = await fetchRawBands(11, 48, '2025-06-01', '2025-06-30', 'sentinel-2-l2a', ['B08'])
 
     expect(Object.keys(series)).toEqual(['2025-06-10'])
     expect(unresolved.map(f => f.date)).toEqual(['2025-06-15'])
@@ -160,7 +207,7 @@ describe('fetchRawBands', () => {
   it('does not retry a non-retriable error type', async () => {
     bodies = [{ data: [makeFailedEntry('2025-06-15', 'BAD_REQUEST')] }]
 
-    const { unresolved } = await fetchRawBands(11, 48, '2025-06-01', '2025-06-30', 'sentinel-2-l2a')
+    const { unresolved } = await fetchRawBands(11, 48, '2025-06-01', '2025-06-30', 'sentinel-2-l2a', ['B08'])
 
     expect(unresolved).toEqual([{ date: '2025-06-15', type: 'BAD_REQUEST', retriable: false }])
     expect(bodies).toHaveLength(0) // the retry would have consumed a second body

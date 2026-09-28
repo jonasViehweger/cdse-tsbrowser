@@ -2,7 +2,8 @@ import { ref, computed, watch, type Ref } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { fetchBandTimeSeries } from '../services/bandCache'
-import type { BandTimeSeries, TimeSeriesPoint } from '../types/api'
+import { BAND_NAMES, isRetriableError } from '../services/statisticalApi'
+import type { BandName, BandTimeSeries, TimeSeriesPoint } from '../types/api'
 import type { DataSource } from '../types/datasource'
 
 const MOCK = import.meta.env.VITE_MOCK === 'true'
@@ -11,6 +12,10 @@ export interface UseTimeSeriesReturn {
   data: Readonly<Ref<TimeSeriesPoint[]>>
   loading: Ref<boolean>
   error: Ref<string | null>
+  /** Whether the current error is transient (e.g. rate limiting), so retrying may help. */
+  canRetry: Ref<boolean>
+  /** Try again, fetching only what isn't cached yet. */
+  retry: () => void
   refetch: () => void
 }
 
@@ -52,16 +57,27 @@ export function useTimeSeries(
   const appStore = useAppStore()
   const authStore = useAuthStore()
   const bandData = ref<BandTimeSeries | null>(null)
+  /** Bands present in bandData; the others are null. */
+  const loadedBands = ref<readonly BandName[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const canRetry = ref(false)
+
+  // Only the bands the index needs (plus SCL for masking) are fetched.
+  const requiredBands = computed<BandName[]>(() => {
+    const ds = dataSource.value
+    if (!ds) return []
+    return maskClouds.value && !ds.bands.includes('SCL') ? [...ds.bands, 'SCL'] : ds.bands
+  })
+  const hasRequiredBands = () => requiredBands.value.every(b => loadedBands.value.includes(b))
 
   // Recomputes automatically when bandData, dataSource, maskClouds or the valid
-  // SCL classes change — no network round-trip needed when toggling cloud
-  // masking, adjusting classes, or switching index.
+  // SCL classes change. Switching index or enabling masking only needs a fetch
+  // when it requires bands not loaded yet.
   const data = computed<TimeSeriesPoint[]>(() => {
     const ds = dataSource.value
     const bands = bandData.value
-    if (!ds || !bands) return []
+    if (!ds || !bands || !hasRequiredBands()) return []
     const validScl = new Set(validSclClasses.value)
     return Object.entries(bands)
       .map(([date, b]) => {
@@ -74,6 +90,8 @@ export function useTimeSeries(
   })
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  // Only the latest fetch may write its result; earlier ones are superseded.
+  let fetchId = 0
 
   async function doFetch(force: boolean) {
     const ds = dataSource.value
@@ -82,21 +100,28 @@ export function useTimeSeries(
     const [lon, lat] = appStore.coordinate
     const startDate = appStore.startDate
     const endDate = appStore.endDate
+    const bands = requiredBands.value
+    const id = ++fetchId
 
     loading.value = true
     error.value = null
+    canRetry.value = false
 
     try {
-      if (MOCK) {
-        bandData.value = generateMockBandData(startDate, endDate)
-      } else {
-        bandData.value = await fetchBandTimeSeries(lon, lat, startDate, endDate, ds.collection, force)
-      }
+      const result = MOCK
+        ? generateMockBandData(startDate, endDate)
+        : await fetchBandTimeSeries(lon, lat, startDate, endDate, ds.collection, bands, force)
+      if (id !== fetchId) return
+      bandData.value = result
+      loadedBands.value = MOCK ? BAND_NAMES : bands
     } catch (e) {
+      if (id !== fetchId) return
       error.value = e instanceof Error ? e.message : String(e)
+      canRetry.value = isRetriableError(e)
       bandData.value = null
+      loadedBands.value = []
     } finally {
-      loading.value = false
+      if (id === fetchId) loading.value = false
     }
   }
 
@@ -108,8 +133,17 @@ export function useTimeSeries(
     }, 400)
   }
 
+  // Fetch newly required bands right away when switching index or enabling
+  // masking. Bands already cached come back without a request. A pending
+  // debounced fetch picks up the new bands itself.
+  watch(
+    () => requiredBands.value.join(),
+    () => {
+      if (debounceTimer === null && !hasRequiredBands()) doFetch(false)
+    },
+  )
+
   // Re-fetch bands when location or dates change.
-  // maskClouds and dataSource changes are handled by the computed above.
   watch(
     [() => appStore.coordinate, () => appStore.startDate, () => appStore.endDate],
     () => {
@@ -123,12 +157,14 @@ export function useTimeSeries(
   )
 
   // Auto-fetch when the user authenticates (token transitions from absent to present).
+  // Not forced: fetches without a token fail before anything is cached, so
+  // whatever is cached is still valid.
   watch(
     () => authStore.isAuthenticated,
     (authenticated, wasAuthenticated) => {
-      if (authenticated && !wasAuthenticated) scheduleFetch(true)
+      if (authenticated && !wasAuthenticated) scheduleFetch(false)
     },
   )
 
-  return { data, loading, error, refetch: () => scheduleFetch(true) }
+  return { data, loading, error, canRetry, retry: () => doFetch(false), refetch: () => scheduleFetch(true) }
 }

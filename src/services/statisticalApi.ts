@@ -1,49 +1,42 @@
-import type { BandTimeSeries, RawBands } from '../types/api'
+import type { BandName, RawBands } from '../types/api'
 import { buildPixelPolygon } from '../utils/geometry'
 import { getValidToken } from './auth'
 
 const STATISTICS_ENDPOINT = `${import.meta.env.VITE_API_BASE}/api/v1/statistics`
 
-const BAND_NAMES = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12', 'SCL'] as const
+export const BAND_NAMES: readonly BandName[] = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12', 'SCL']
 
 // L2A reflectance is stored as UINT16 DN / 10000, so the DN is lossless.
 const REFLECTANCE_SCALE = 10000
 
-// Single evalscript — all raw bands including SCL are always fetched.
-// Cloud masking is applied client-side using the SCL band values.
-// Outputs are integers because FLOAT32 output doubles the processing units:
-// reflectances go out as DN (scaled back in parseRawBandsResponse).
-const EVALSCRIPT_RAW = `//VERSION=3
+/**
+ * Evalscript returning the requested raw bands. Cloud masking is applied
+ * client-side using the SCL band values.
+ * PUs scale with the number of input bands, so only the requested ones are read.
+ * Outputs are integers because FLOAT32 output doubles the processing units:
+ * reflectances go out as DN (scaled back in parseRawBandsResponse).
+ */
+export function buildEvalscript(bands: readonly BandName[]): string {
+  const outputs = bands.map(b => `{ id: "${b}", bands: 1, sampleType: "${b === 'SCL' ? 'UINT8' : 'UINT16'}" }`)
+  outputs.push('{ id: "dataMask", bands: 1, sampleType: "UINT8" }')
+  const values = bands.map(b => `${b}: [${b === 'SCL' ? 's.SCL' : `dn(s.${b})`}]`)
+  values.push('dataMask: [s.dataMask]')
+  return `//VERSION=3
 function setup() {
   return {
-    input: [{ bands: ["B02","B03","B04","B05","B06","B07","B08","B8A","B11","B12","SCL","dataMask"] }],
+    input: [{ bands: ${JSON.stringify([...bands, 'dataMask'])} }],
     output: [
-      { id: "B02", bands: 1, sampleType: "UINT16" },
-      { id: "B03", bands: 1, sampleType: "UINT16" },
-      { id: "B04", bands: 1, sampleType: "UINT16" },
-      { id: "B05", bands: 1, sampleType: "UINT16" },
-      { id: "B06", bands: 1, sampleType: "UINT16" },
-      { id: "B07", bands: 1, sampleType: "UINT16" },
-      { id: "B08", bands: 1, sampleType: "UINT16" },
-      { id: "B8A", bands: 1, sampleType: "UINT16" },
-      { id: "B11", bands: 1, sampleType: "UINT16" },
-      { id: "B12", bands: 1, sampleType: "UINT16" },
-      { id: "SCL", bands: 1, sampleType: "UINT8" },
-      { id: "dataMask", bands: 1, sampleType: "UINT8" }
+      ${outputs.join(',\n      ')}
     ]
   }
 }
 function dn(r) { return Math.round(r * ${REFLECTANCE_SCALE}) }
 function evaluatePixel(s) {
   return {
-    B02: [dn(s.B02)], B03: [dn(s.B03)], B04: [dn(s.B04)],
-    B05: [dn(s.B05)], B06: [dn(s.B06)], B07: [dn(s.B07)],
-    B08: [dn(s.B08)], B8A: [dn(s.B8A)], B11: [dn(s.B11)], B12: [dn(s.B12)],
-    SCL: [s.SCL],
-    dataMask: [s.dataMask]
+    ${values.join(',\n    ')}
   }
 }`
-
+}
 
 export type BandStatsOutputs = Record<
   string,
@@ -76,13 +69,16 @@ export interface FailedInterval {
   retriable: boolean
 }
 
+/** date → the bands that were requested; the rest are absent. */
+export type PartialBandSeries = Record<string, Partial<RawBands>>
+
 export interface ParsedRawBands {
-  series: BandTimeSeries
+  series: PartialBandSeries
   failed: FailedInterval[]
 }
 
 export function parseRawBandsResponse(json: RawBandsResponse): ParsedRawBands {
-  const series: BandTimeSeries = {}
+  const series: PartialBandSeries = {}
   const failed: FailedInterval[] = []
 
   for (const entry of json.data) {
@@ -96,14 +92,15 @@ export function parseRawBandsResponse(json: RawBandsResponse): ParsedRawBands {
       continue
     }
 
-    const bands = {} as RawBands
+    const bands: Partial<RawBands> = {}
     for (const band of BAND_NAMES) {
+      if (!(band in entry.outputs)) continue
       const mean = entry.outputs[band]?.bands?.B0?.stats?.mean
       if (mean == null || !isFinite(mean)) bands[band] = null
       else bands[band] = band === 'SCL' ? mean : mean / REFLECTANCE_SCALE
     }
     // Only store dates that have at least some valid data
-    if (BAND_NAMES.some(b => bands[b] !== null)) {
+    if (Object.values(bands).some(v => v !== null)) {
       series[date] = bands
     }
   }
@@ -111,8 +108,50 @@ export function parseRawBandsResponse(json: RawBandsResponse): ParsedRawBands {
   return { series, failed }
 }
 
+export class StatisticalApiError extends Error {
+  constructor(
+    readonly status: number,
+    detail: string,
+    readonly code?: string,
+  ) {
+    super(`Statistical API error: ${detail} (HTTP ${status})`)
+    this.name = 'StatisticalApiError'
+  }
+
+  /** Rate limits and server errors may succeed when tried again later. */
+  get retriable(): boolean {
+    return this.status === 429 || this.status >= 500
+  }
+}
+
+/** Whether trying the same request again later may succeed. */
+export function isRetriableError(e: unknown): boolean {
+  if (e instanceof StatisticalApiError) return e.retriable
+  // fetch() rejects with a TypeError when the network request itself fails.
+  return e instanceof TypeError
+}
+
+type ErrorBody = {
+  message?: string
+  error?: string | { message?: string; reason?: string; code?: string }
+}
+
+/** Sentinel Hub errors come as `{ error: { status, reason, message, code } }`. */
+export async function readApiError(response: Response): Promise<StatisticalApiError> {
+  const text = await response.text().catch(() => '')
+  try {
+    const body = JSON.parse(text) as ErrorBody
+    const error = typeof body.error === 'object' && body.error !== null ? body.error : undefined
+    const detail = error?.message ?? error?.reason ?? body.message ?? (typeof body.error === 'string' ? body.error : undefined)
+    if (detail) return new StatisticalApiError(response.status, detail, error?.code)
+  } catch {
+    // Not JSON — fall back to the raw text
+  }
+  return new StatisticalApiError(response.status, text.trim() || response.statusText || 'request failed')
+}
+
 export interface RawBandsResult {
-  series: BandTimeSeries
+  series: PartialBandSeries
   /**
    * Intervals still missing after retries. A gap here is "we don't know", not
    * "no data" — callers must not persist it as if the range were complete.
@@ -121,7 +160,7 @@ export interface RawBandsResult {
 }
 
 /**
- * Fetch raw Sentinel-2 band means for a single date range, recovering any
+ * Fetch the given raw Sentinel-2 band means for a single date range, recovering any
  * intervals that failed transiently.
  *
  * Chunking and caching are handled by bandCache.ts.
@@ -132,8 +171,9 @@ export async function fetchRawBands(
   startDate: string,
   endDate: string,
   collection: string,
+  bands: readonly BandName[],
 ): Promise<RawBandsResult> {
-  const first = await requestRawBands(lon, lat, startDate, endDate, collection)
+  const first = await requestRawBands(lon, lat, startDate, endDate, collection, bands)
 
   const retriable = first.failed.filter(f => f.retriable)
   const unresolved = first.failed.filter(f => !f.retriable)
@@ -145,7 +185,7 @@ export async function fetchRawBands(
   const retries = await Promise.all(
     retriable.map(async (f): Promise<ParsedRawBands> => {
       try {
-        return await requestRawBands(lon, lat, f.date, f.date, collection)
+        return await requestRawBands(lon, lat, f.date, f.date, collection, bands)
       } catch {
         return { series: {}, failed: [f] }
       }
@@ -164,10 +204,11 @@ async function requestRawBands(
   startDate: string,
   endDate: string,
   collection: string,
+  bands: readonly BandName[],
 ): Promise<ParsedRawBands> {
   const token = await getValidToken()
   const geometry = buildPixelPolygon(lon, lat)
-  const evalscript = EVALSCRIPT_RAW
+  const evalscript = buildEvalscript(bands)
 
   const body = {
     input: {
@@ -215,16 +256,7 @@ async function requestRawBands(
     await new Promise(r => setTimeout(r, baseDelayMs + jitter))
   }
 
-  if (!response.ok) {
-    let message: string
-    try {
-      const err = (await response.json()) as { message?: string; error?: string }
-      message = err.message ?? err.error ?? `HTTP ${response.status}`
-    } catch {
-      message = await response.text().catch(() => `HTTP ${response.status}`)
-    }
-    throw new Error(`Statistical API error: ${message}`)
-  }
+  if (!response.ok) throw await readApiError(response)
 
   const json = (await response.json()) as RawBandsResponse
   return parseRawBandsResponse(json)
