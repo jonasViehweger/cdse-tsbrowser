@@ -3,6 +3,9 @@ import L from 'leaflet'
 // Sentinel Hub rejects GetMap requests larger than this in either dimension.
 export const MAX_WMS_IMAGE_SIZE = 2500
 
+// Finest Sentinel-2 band resolution; requesting finer only upsamples server-side.
+const NATIVE_RESOLUTION_M = 10
+
 type WmsParams = Record<string, string | boolean>
 
 /**
@@ -60,6 +63,16 @@ export class SingleImageWms extends L.Layer {
     const crs = map.options.crs!
     const sw = crs.project(bounds.getSouthWest())
     const ne = crs.project(bounds.getNorthEast())
+
+    // Zoomed in past the imagery's native resolution, request it at native
+    // resolution and let the browser scale it up: same picture, fewer pixels
+    // (PUs scale with pixel count). Web Mercator units shrink to ground metres
+    // by cos(latitude).
+    const groundRes = ((ne.x - sw.x) / size.x) * Math.cos((bounds.getCenter().lat * Math.PI) / 180)
+    const scale = Math.min(1, groundRes / NATIVE_RESOLUTION_M)
+    const width = Math.max(1, Math.round(size.x * scale))
+    const height = Math.max(1, Math.round(size.y * scale))
+
     const query = {
       SERVICE: 'WMS',
       REQUEST: 'GetMap',
@@ -67,8 +80,8 @@ export class SingleImageWms extends L.Layer {
       STYLES: '',
       SRS: crs.code,
       BBOX: [sw.x, sw.y, ne.x, ne.y].join(','),
-      WIDTH: size.x,
-      HEIGHT: size.y,
+      WIDTH: width,
+      HEIGHT: height,
       ...this.params,
     }
     const src = this.url + L.Util.getParamString(query, this.url, true)
@@ -88,5 +101,8 @@ export class SingleImageWms extends L.Layer {
       this.current = overlay
     })
     overlay.addTo(map)
+    // Show upscaled pixels as crisp squares, like the server's nearest-neighbour
+    // upsampling did, instead of blurring them.
+    overlay.getElement()!.style.imageRendering = 'pixelated'
   }
 }
