@@ -86,7 +86,7 @@ function wmsParams(): { layers: string } & Record<string, string | boolean> {
   const time = timeParam(mapDate.value)
   return {
     layers: activeLayer.value,
-    format: 'image/jpeg',
+    format: 'image/png',
     transparent: false,
     ...(time ? { TIME: time } : {}),
   }
