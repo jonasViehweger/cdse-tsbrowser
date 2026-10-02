@@ -1,7 +1,7 @@
-import { ref, computed, watch, type Ref } from 'vue'
+import { ref, computed, watch, reactive, onScopeDispose, type Ref } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
-import { fetchBandTimeSeries } from '../services/bandCache'
+import { fetchBandTimeSeries, prefetchBandTimeSeries, type PrefetchNeed, type PrefetchTarget } from '../services/bandCache'
 import { BAND_NAMES, isRetriableError } from '../services/statisticalApi'
 import type { BandName, BandTimeSeries, TimeSeriesPoint } from '../types/api'
 import type { DataSource } from '../types/datasource'
@@ -48,6 +48,47 @@ function generateMockBandData(startDate: string, endDate: string): BandTimeSerie
 }
 
 // ---------------------------------------------------------------------------
+// Prefetching — loads what the open panels will need at upcoming locations
+// ---------------------------------------------------------------------------
+
+/** What each mounted time series wants, so a prefetch fetches the same. */
+const panelNeeds = reactive(new Map<symbol, PrefetchNeed>())
+
+/** Bands per collection across all panels, so each location takes one request per chunk. */
+function combinedNeeds(): PrefetchNeed[] {
+  const byCollection = new Map<string, Set<BandName>>()
+  for (const { collection, bands } of panelNeeds.values()) {
+    const set = byCollection.get(collection) ?? new Set()
+    bands.forEach(b => set.add(b))
+    byCollection.set(collection, set)
+  }
+  return [...byCollection].map(([collection, bands]) => ({ collection, bands: [...bands] }))
+}
+
+/**
+ * Keep the cache filled for `targets`, in order, with what the open time series
+ * panels need over the current date range. Runs again whenever any of those change.
+ */
+export function usePrefetchTimeSeries(targets: Ref<PrefetchTarget[]>) {
+  const appStore = useAppStore()
+  const authStore = useAuthStore()
+
+  watch(
+    () => JSON.stringify([targets.value, appStore.startDate, appStore.endDate, combinedNeeds(), authStore.isAuthenticated]),
+    () => {
+      // Without a token every request would fail; the next change after login retries.
+      if (MOCK || !authStore.isAuthenticated) return
+      void prefetchBandTimeSeries(targets.value, appStore.startDate, appStore.endDate, combinedNeeds())
+    },
+    { immediate: true },
+  )
+
+  onScopeDispose(() => {
+    void prefetchBandTimeSeries([], '', '', [])
+  })
+}
+
+// ---------------------------------------------------------------------------
 
 export function useTimeSeries(
   dataSource: Ref<DataSource | undefined>,
@@ -69,6 +110,17 @@ export function useTimeSeries(
     if (!ds) return []
     return maskClouds.value && !ds.bands.includes('SCL') ? [...ds.bands, 'SCL'] : ds.bands
   })
+  const needKey = Symbol('timeSeries')
+  watch(
+    [() => dataSource.value?.collection, requiredBands],
+    ([collection, bands]) => {
+      if (collection) panelNeeds.set(needKey, { collection, bands })
+      else panelNeeds.delete(needKey)
+    },
+    { immediate: true },
+  )
+  onScopeDispose(() => panelNeeds.delete(needKey))
+
   const hasRequiredBands = () => requiredBands.value.every(b => loadedBands.value.includes(b))
 
   // Recomputes automatically when bandData, dataSource, maskClouds or the valid

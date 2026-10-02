@@ -1,6 +1,7 @@
 import type { BandName, RawBands } from '../types/api'
 import { buildPixelPolygon } from '../utils/geometry'
 import { getValidToken } from './auth'
+import { acquireSlot, pauseFor, type Priority } from './requestScheduler'
 
 const STATISTICS_ENDPOINT = `${import.meta.env.VITE_API_BASE}/api/v1/statistics`
 
@@ -172,8 +173,9 @@ export async function fetchRawBands(
   endDate: string,
   collection: string,
   bands: readonly BandName[],
+  priority: Priority = 'foreground',
 ): Promise<RawBandsResult> {
-  const first = await requestRawBands(lon, lat, startDate, endDate, collection, bands)
+  const first = await requestRawBands(lon, lat, startDate, endDate, collection, bands, priority)
 
   const retriable = first.failed.filter(f => f.retriable)
   const unresolved = first.failed.filter(f => !f.retriable)
@@ -185,7 +187,7 @@ export async function fetchRawBands(
   const retries = await Promise.all(
     retriable.map(async (f): Promise<ParsedRawBands> => {
       try {
-        return await requestRawBands(lon, lat, f.date, f.date, collection, bands)
+        return await requestRawBands(lon, lat, f.date, f.date, collection, bands, priority)
       } catch {
         return { series: {}, failed: [f] }
       }
@@ -205,6 +207,7 @@ async function requestRawBands(
   endDate: string,
   collection: string,
   bands: readonly BandName[],
+  priority: Priority,
 ): Promise<ParsedRawBands> {
   const token = await getValidToken()
   const geometry = buildPixelPolygon(lon, lat)
@@ -237,6 +240,7 @@ async function requestRawBands(
   const MAX_RETRIES = 4
   let response!: Response
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await acquireSlot(priority)
     response = await fetch(STATISTICS_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -250,10 +254,10 @@ async function requestRawBands(
     // Retry-After is in milliseconds per Sentinel Hub docs.
     // Add full jitter (random 0–100% of base delay) so concurrent retries
     // don't re-synchronize and immediately re-trigger the rate limit.
+    // The pause applies to all requests, so the next attempt waits for it too.
     const retryAfter = response.headers.get('Retry-After')
     const baseDelayMs = retryAfter ? parseFloat(retryAfter) : 1000 * 2 ** attempt
-    const jitter = Math.random() * baseDelayMs
-    await new Promise(r => setTimeout(r, baseDelayMs + jitter))
+    pauseFor(baseDelayMs + Math.random() * baseDelayMs)
   }
 
   if (!response.ok) throw await readApiError(response)

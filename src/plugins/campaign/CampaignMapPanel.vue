@@ -54,6 +54,24 @@
           </p>
         </div>
       </label>
+
+      <label class="field-row align-top">
+        <span class="field-label">Pre-fetch</span>
+        <div class="field-stack">
+          <input
+            v-model.number="draftPrefetch"
+            type="number"
+            min="0"
+            max="20"
+            class="field-input"
+          />
+          <p class="field-hint">
+            Loads the time series of this many upcoming samples in the background, so
+            they show up right away. 0 turns it off. Each one costs processing units,
+            even if you skip it.
+          </p>
+        </div>
+      </label>
     </PanelSettingsModal>
   </div>
 </template>
@@ -66,6 +84,7 @@ import { useAppStore } from '../../stores/app'
 import { useCampaignStore } from '../../stores/campaign'
 import { usePanelSettingsStore } from '../../stores/panelSettings'
 import { basemapUrl } from '../../utils/basemap'
+import { usePrefetchTimeSeries } from '../../composables/useTimeSeries'
 import PanelSettingsModal from '../../components/PanelSettingsModal.vue'
 import type { SampleRecord } from '../../types/campaign'
 
@@ -109,6 +128,10 @@ const queue = ref<string[]>([])
 const queueInput = ref('')
 const queueNote = ref('')
 
+const DEFAULT_PREFETCH = 2
+/** How many upcoming samples to load ahead of time. */
+const prefetchCount = ref(DEFAULT_PREFETCH)
+
 /** Sample ids are numbers in some campaigns and strings in others. */
 function idOf(feat: { properties: { sample_id: string } }): string {
   return String(feat.properties.sample_id)
@@ -119,13 +142,15 @@ function loadNav() {
   queue.value = []
   queueInput.value = ''
   queueNote.value = ''
+  prefetchCount.value = DEFAULT_PREFETCH
   const name = campaignStore.schema?.name
   if (!name) return
   try {
     const raw = localStorage.getItem(`${NAV_KEY}:${name}`)
     if (!raw) return
-    const saved = JSON.parse(raw) as { field?: string; queue?: string[] }
+    const saved = JSON.parse(raw) as { field?: string; queue?: string[]; prefetch?: number }
     navField.value = saved.field ?? ''
+    prefetchCount.value = saved.prefetch ?? DEFAULT_PREFETCH
     queue.value = saved.queue ?? []
     queueInput.value = queue.value.join(', ')
   } catch { /* unreadable settings aren't worth failing over */ }
@@ -135,7 +160,7 @@ function saveNav() {
   const name = campaignStore.schema?.name
   if (!name) return
   try {
-    localStorage.setItem(`${NAV_KEY}:${name}`, JSON.stringify({ field: navField.value, queue: queue.value }))
+    localStorage.setItem(`${NAV_KEY}:${name}`, JSON.stringify({ field: navField.value, queue: queue.value, prefetch: prefetchCount.value }))
   } catch { /* quota */ }
 }
 
@@ -165,17 +190,21 @@ function parseQueue(text: string): { ids: string[]; unknown: number } {
 const showSettings = ref(false)
 const draftField = ref('')
 const draftQueue = ref('')
+const draftPrefetch = ref(DEFAULT_PREFETCH)
 
 const draftUnknownCount = computed(() => parseQueue(draftQueue.value).unknown)
 
 function openSettings() {
   draftField.value = navField.value
   draftQueue.value = queueInput.value
+  draftPrefetch.value = prefetchCount.value
   showSettings.value = true
 }
 
 function applySettings() {
   navField.value = draftField.value
+  const prefetch = Math.round(draftPrefetch.value)
+  prefetchCount.value = Number.isFinite(prefetch) ? Math.min(20, Math.max(0, prefetch)) : DEFAULT_PREFETCH
 
   const { ids } = parseQueue(draftQueue.value)
   const started = ids.length > 0 && ids[0] !== queue.value[0]
@@ -218,6 +247,27 @@ function needsLabelling(sampleId: string): boolean {
 }
 
 /**
+ * The samples "Save & Next" will visit after `currentId`, in order: the rest of
+ * the queue when one is set, otherwise the ones the rule still wants.
+ */
+function upcoming(currentId: string | null, n: number): string[] {
+  if (n <= 0) return []
+  if (queue.value.length) return queue.value.filter(id => id !== currentId).slice(0, n)
+  return byRule(currentId, n)
+}
+
+/** The first `n` samples other than `skipId` that the rule still wants. */
+function byRule(skipId: string | null, n: number): string[] {
+  const ids: string[] = []
+  for (const f of campaignStore.features) {
+    if (ids.length === n) break
+    const id = idOf(f)
+    if (id !== skipId && needsLabelling(id)) ids.push(id)
+  }
+  return ids
+}
+
+/**
  * Move on after a save: down the queue when one is set, otherwise to the first
  * sample the rule still wants.
  *
@@ -236,14 +286,21 @@ function advance(savedId: string) {
     if (goTo(queue.value[0])) return
   }
 
-  const next = campaignStore.features.find(
-    f => idOf(f) !== savedId && needsLabelling(idOf(f))
-  )
-  if (next) {
-    const [lon, lat] = next.geometry.coordinates
-    appStore.setCoordinate(lon, lat)
-  }
+  const [next] = byRule(savedId, 1)
+  if (next) goTo(next)
 }
+
+// The samples after the current one, loaded ahead so "Save & Next" lands on a
+// ready chart.
+const prefetchTargets = computed(() => {
+  return upcoming(currentSampleId.value, prefetchCount.value).flatMap(id => {
+    const feat = campaignStore.features.find(f => idOf(f) === id)
+    if (!feat) return []
+    const [lon, lat] = feat.geometry.coordinates
+    return [{ lon, lat }]
+  })
+})
+usePrefetchTimeSeries(prefetchTargets)
 
 function saveAndNext() {
   if (!currentSampleId.value) return
@@ -422,6 +479,7 @@ onUnmounted(() => {
 }
 
 .field-select,
+.field-input,
 .field-textarea {
   width: 100%;
   background: var(--bg-input);
@@ -442,7 +500,12 @@ onUnmounted(() => {
   resize: vertical;
 }
 
+.field-input {
+  width: 80px;
+}
+
 .field-select:focus,
+.field-input:focus,
 .field-textarea:focus {
   border-color: var(--accent);
 }
