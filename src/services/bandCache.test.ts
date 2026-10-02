@@ -11,6 +11,14 @@ type Call = [from: string, to: string, bands: BandName[]]
 
 let calls: Call[]
 let fetchBandTimeSeries: typeof import('./bandCache').fetchBandTimeSeries
+let prefetchBandTimeSeries: typeof import('./bandCache').prefetchBandTimeSeries
+/** Priority each request in `calls` was sent with. */
+let priorities: (string | undefined)[]
+/** Requests in flight right now, and the most there have been at once. */
+let inFlight: number
+let maxInFlight: number
+/** While set, requests wait for it before responding. */
+let gate: Promise<void> | null
 /** Override to fail or leave gaps for particular requests. */
 let respond: (from: string, to: string, bands: BandName[]) => RawBandsResult
 
@@ -42,13 +50,25 @@ beforeEach(async () => {
   vi.stubGlobal('localStorage', new MemoryStorage())
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   calls = []
+  priorities = []
+  inFlight = 0
+  maxInFlight = 0
+  gate = null
   respond = observations
   const api = await import('./statisticalApi')
-  vi.mocked(api.fetchRawBands).mockImplementation(async (_lon, _lat, from, to, _collection, bands) => {
+  vi.mocked(api.fetchRawBands).mockImplementation(async (_lon, _lat, from, to, _collection, bands, priority) => {
     calls.push([from, to, [...bands]])
-    return respond(from, to, [...bands])
+    priorities.push(priority)
+    maxInFlight = Math.max(maxInFlight, ++inFlight)
+    try {
+      await new Promise(r => setTimeout(r, 1))
+      await gate
+      return respond(from, to, [...bands])
+    } finally {
+      inFlight--
+    }
   })
-  fetchBandTimeSeries = (await import('./bandCache')).fetchBandTimeSeries
+  ;({ fetchBandTimeSeries, prefetchBandTimeSeries } = await import('./bandCache'))
 })
 
 afterEach(() => {
@@ -169,5 +189,62 @@ describe('fetchBandTimeSeries', () => {
     expect(calls).toEqual([['2024-06-28', '2024-06-30', ['B08', 'SCL']]])
     expect(series['2024-04-15']).toMatchObject({ B08: 0.3, SCL: 4 })
     expect(localStorage.getItem(legacyKey)).toBeNull()
+  })
+})
+
+describe('prefetchBandTimeSeries', () => {
+  const near = { lon: 11, lat: 48 }
+  const far = { lon: 12, lat: 49 }
+  const needs = [{ collection: L2A, bands: ['B08', 'SCL'] as BandName[] }]
+
+  /** Hold requests until the returned function is called. */
+  function holdRequests(): () => void {
+    let release!: () => void
+    gate = new Promise(r => { release = r })
+    return () => { gate = null; release() }
+  }
+
+  it('fetches one request at a time in the background, so a later load needs none', async () => {
+    await prefetchBandTimeSeries([near, far], '2024-03-01', '2024-09-30', needs)
+
+    expect(calls).toHaveLength(4)
+    expect(maxInFlight).toBe(1)
+    expect(priorities).toEqual(['background', 'background', 'background', 'background'])
+
+    calls = []
+    const series = await fetchPlain('2024-03-01', '2024-09-30', ['B08'])
+    expect(calls).toEqual([])
+    expect(Object.keys(series)).toHaveLength(7)
+  })
+
+  it('drops what it has not started when called again', async () => {
+    const release = holdRequests()
+    const first = prefetchBandTimeSeries([near, far], '2024-03-01', '2024-09-30', needs)
+    await vi.waitFor(() => expect(inFlight).toBe(1))
+    await prefetchBandTimeSeries([], '2024-03-01', '2024-09-30', needs)
+    release()
+    await first
+
+    expect(calls).toHaveLength(1)
+  })
+
+  it('leaves a location to a load requested meanwhile', async () => {
+    const release = holdRequests()
+    const prefetch = prefetchBandTimeSeries([near], '2024-03-01', '2024-09-30', needs)
+    await vi.waitFor(() => expect(inFlight).toBe(1))
+    const load = fetchPlain('2024-03-01', '2024-09-30', ['B08', 'SCL'])
+    release()
+    await Promise.all([prefetch, load])
+
+    // The prefetch's first request finishes; the load fetches the rest itself.
+    expect(calls).toHaveLength(2)
+    expect(priorities).toEqual(['background', 'foreground'])
+  })
+
+  it('stops after a failed request', async () => {
+    respond = () => { throw new Error('Statistical API error: rate limited') }
+    await prefetchBandTimeSeries([near, far], '2024-03-01', '2024-09-30', needs)
+
+    expect(calls).toHaveLength(1)
   })
 })

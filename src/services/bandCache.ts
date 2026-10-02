@@ -1,5 +1,6 @@
 import type { BandName, BandTimeSeries, RawBands } from '../types/api'
 import { BAND_NAMES, fetchRawBands, type PartialBandSeries } from './statisticalApi'
+import type { Priority } from './requestScheduler'
 
 const CHUNK_PREFIX = 'cdse-bandchunk-'
 /** Pre-chunking cache: one entry per exact date range, holding all bands. */
@@ -247,6 +248,18 @@ function planFetches(
   return jobs
 }
 
+/** Fetch one planned request and store what came back. */
+async function runJob(lon: number, lat: number, collection: string, location: string, job: FetchJob, priority: Priority) {
+  const { series, unresolved } = await fetchRawBands(lon, lat, job.from, job.to, collection, job.bands, priority)
+  if (unresolved.length) {
+    console.warn(
+      `Statistical API: ${unresolved.length} interval(s) failed and could not be recovered; ` +
+        `they will be retried on the next load. ${unresolved.map(f => `${f.date} (${f.type})`).join(', ')}`,
+    )
+  }
+  storeSeries(location, job.from, job.to, job.bands, series, { unresolvedDates: unresolved.map(f => f.date) })
+}
+
 async function fillCache(
   lon: number,
   lat: number,
@@ -258,18 +271,7 @@ async function fillCache(
 ) {
   const location = locationKey(collection, lon, lat)
   const jobs = planFetches(location, startDate, endDate, bands, force)
-  const results = await Promise.allSettled(
-    jobs.map(async job => {
-      const { series, unresolved } = await fetchRawBands(lon, lat, job.from, job.to, collection, job.bands)
-      if (unresolved.length) {
-        console.warn(
-          `Statistical API: ${unresolved.length} interval(s) failed and could not be recovered; ` +
-            `they will be retried on the next load. ${unresolved.map(f => `${f.date} (${f.type})`).join(', ')}`,
-        )
-      }
-      storeSeries(location, job.from, job.to, job.bands, series, { unresolvedDates: unresolved.map(f => f.date) })
-    }),
-  )
+  const results = await Promise.allSettled(jobs.map(job => runJob(lon, lat, collection, location, job, 'foreground')))
   const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
   if (failure) throw failure.reason
 }
@@ -295,6 +297,18 @@ interface Batch {
 
 const batches = new Map<string, Batch>()
 
+/** Locations with a fill on the way that a prefetch must make way for, by number of fills. */
+const foregroundPending = new Map<string, number>()
+
+function trackForeground(location: string, done: Promise<void>) {
+  foregroundPending.set(location, (foregroundPending.get(location) ?? 0) + 1)
+  done.catch(() => {}).finally(() => {
+    const count = foregroundPending.get(location)! - 1
+    if (count) foregroundPending.set(location, count)
+    else foregroundPending.delete(location)
+  })
+}
+
 function requestFill(
   lon: number,
   lat: number,
@@ -316,6 +330,7 @@ function requestFill(
       )
     })
     batches.set(key, created)
+    trackForeground(location, created.done)
     batch = created
   }
   for (const band of bands) batch.bands.add(band)
@@ -361,4 +376,68 @@ export async function fetchBandTimeSeries(
     await requestFill(lon, lat, startDate, endDate, collection, bands, force)
   }
   return assembleSeries(location, startDate, endDate, bands)
+}
+
+// ── Prefetching ────────────────────────────────────────────────────────────
+
+export interface PrefetchTarget {
+  lon: number
+  lat: number
+}
+
+export interface PrefetchNeed {
+  collection: string
+  bands: readonly BandName[]
+}
+
+/** Bumped by every prefetch call; a running prefetch stops once it is outdated. */
+let prefetchGeneration = 0
+
+/**
+ * Fill the cache for locations the user is likely to open next, one request
+ * at a time and at background priority, so it never competes with a load the
+ * user is waiting for.
+ *
+ * Each call replaces the previous one: whatever it hadn't started is dropped.
+ * A location that gets loaded for display meanwhile is left to that load.
+ */
+export function prefetchBandTimeSeries(
+  targets: readonly PrefetchTarget[],
+  startDate: string,
+  endDate: string,
+  needs: readonly PrefetchNeed[],
+): Promise<void> {
+  const generation = ++prefetchGeneration
+  return runPrefetch(generation, targets, startDate, endDate, needs)
+}
+
+async function runPrefetch(
+  generation: number,
+  targets: readonly PrefetchTarget[],
+  startDate: string,
+  endDate: string,
+  needs: readonly PrefetchNeed[],
+) {
+  migrateLegacyCache()
+  const outdated = () => generation !== prefetchGeneration
+  for (const { lon, lat } of targets) {
+    for (const { collection, bands } of needs) {
+      if (outdated()) return
+      const location = locationKey(collection, lon, lat)
+      if (!planFetches(location, startDate, endDate, bands, false).length) continue
+      try {
+        await queueForLocation(location, async () => {
+          // Planned under the location's lock, so nothing else fills it meanwhile.
+          for (const job of planFetches(location, startDate, endDate, bands, false)) {
+            if (outdated() || foregroundPending.has(location)) return
+            await runJob(lon, lat, collection, location, job, 'background')
+          }
+        })
+      } catch (e) {
+        // Whatever stopped this request would likely stop the next ones too.
+        console.warn('Prefetch stopped:', e)
+        return
+      }
+    }
+  }
 }
