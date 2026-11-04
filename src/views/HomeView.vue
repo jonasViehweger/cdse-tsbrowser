@@ -93,7 +93,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -151,7 +151,7 @@ const coordError = ref('')
 /** Zoom to settle on when a coordinate is typed rather than clicked. */
 const TYPED_ZOOM = 13
 
-let map: L.Map | null = null
+let map: L.LeafletMap | null = null
 let marker: L.CircleMarker | null = null
 
 /** Single place a coordinate becomes the selection, whoever chose it. */
@@ -164,7 +164,7 @@ function setPicked(lon: number, lat: number, recentre: boolean) {
   if (marker) {
     marker.setLatLng([lat, lon])
   } else {
-    marker = L.circleMarker([lat, lon], {
+    marker = new L.CircleMarker([lat, lon], {
       radius: 7,
       color: 'var(--accent)',
       fillColor: 'var(--accent)',
@@ -192,10 +192,10 @@ function applyCoord() {
 
 onMounted(() => {
   if (!mapEl.value) return
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([20, 0], 2)
-  L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
+  map = new L.LeafletMap(mapEl.value, { zoomControl: true, attributionControl: false }).setView([20, 0], 2)
+  new L.TileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
 
-  map.on('click', (e: L.LeafletMouseEvent) => {
+  map.on('click', (e: L.LeafletPointerEvent) => {
     const { lng: lon, lat } = e.latlng.wrap()
     setPicked(lon, lat, false)
   })

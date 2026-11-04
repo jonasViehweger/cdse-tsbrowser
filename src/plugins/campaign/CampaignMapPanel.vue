@@ -78,7 +78,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import { useCampaignStore } from '../../stores/campaign'
@@ -91,7 +91,7 @@ import type { SampleRecord } from '../../types/campaign'
 // dockview hands the panel API in under `params`; we only need the id, to
 // register this panel's settings with the group header.
 const props = defineProps<{
-  params?: { api?: { id: string } }
+  params?: { api?: { id: string; onDidDimensionsChange(listener: () => void): { dispose(): void } } }
 }>()
 
 const appStore = useAppStore()
@@ -99,10 +99,11 @@ const campaignStore = useCampaignStore()
 const settingsStore = usePanelSettingsStore()
 
 const mapEl = ref<HTMLDivElement | null>(null)
-let map: L.Map | null = null
+let map: L.LeafletMap | null = null
 let basemap: L.TileLayer | null = null
-const markerLayer = L.layerGroup()
+const markerLayer = new L.LayerGroup()
 let resizeObserver: ResizeObserver | null = null
+let dimensionsListener: { dispose(): void } | undefined
 
 const completedCount = computed(() =>
   campaignStore.features.filter(f => campaignStore.labellingStatus(f.properties.sample_id) === 'complete').length
@@ -353,7 +354,7 @@ function buildMarkers() {
     const isSelected = appStore.coordinate[0] === lon && appStore.coordinate[1] === lat
     const colour = markerColour(status, isSelected)
 
-    const marker = L.circleMarker([lat, lon], {
+    const marker = new L.CircleMarker([lat, lon], {
       radius: 6,
       color: colour,
       fillColor: colour,
@@ -370,7 +371,7 @@ function buildMarkers() {
 }
 
 watch(
-  [() => campaignStore.features, () => campaignStore.sampleRecords, () => appStore.coordinate, () => appStore.theme],
+  [() => campaignStore.features, () => campaignStore.sampleRecords, () => appStore.coordinate, () => appStore.effectiveTheme],
   () => buildMarkers(),
 )
 
@@ -386,11 +387,14 @@ watch(() => appStore.theme, () => { basemap?.setUrl(basemapUrl()) })
 function initMap() {
   if (!mapEl.value || map) return
   const [lon, lat] = appStore.coordinate
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 10)
-  basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
+  map = new L.LeafletMap(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 10)
+  basemap = new L.TileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
   markerLayer.addTo(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
+  // The observer belongs to the main window, so in a popout it can stall until
+  // that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = props.params?.api?.onDidDimensionsChange(() => map?.invalidateSize())
   buildMarkers()
 }
 
@@ -398,6 +402,7 @@ onMounted(() => initMap())
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  dimensionsListener?.dispose()
   map?.remove()
   map = null
 })

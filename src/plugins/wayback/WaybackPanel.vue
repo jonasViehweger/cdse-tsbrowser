@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import {
@@ -41,7 +41,13 @@ import { buildPixelPolygon } from '../../utils/geometry'
 import { useMapPointPicker } from '../../composables/useMapPointPicker'
 
 const props = defineProps<{
-  params?: { params?: Record<string, unknown>; api?: { updateParameters(p: Record<string, unknown>): void } }
+  params?: {
+    params?: Record<string, unknown>
+    api?: {
+      updateParameters(p: Record<string, unknown>): void
+      onDidDimensionsChange(listener: () => void): { dispose(): void }
+    }
+  }
 }>()
 
 const appStore = useAppStore()
@@ -66,24 +72,28 @@ const statusText = computed(() => {
   return `${found} release${found === 1 ? '' : 's'}`
 })
 
-let map: L.Map | null = null
+let map: L.LeafletMap | null = null
 let basemap: L.TileLayer | null = null
 let tileLayer: L.TileLayer | null = null
 let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
+let dimensionsListener: { dispose(): void } | undefined
 
 function initMap() {
   if (!mapEl.value || map) return
   const [lon, lat] = appStore.coordinate
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 17)
-  basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
-  marker = L.polygon(
+  map = new L.LeafletMap(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 17)
+  basemap = new L.TileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
+  marker = new L.Polygon(
     buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression),
     { color: '#ffff00', fillOpacity: 0, weight: 2 },
   ).addTo(map)
   pointPicker.attach(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
+  // The observer belongs to the main window, so in a popout it can stall until
+  // that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = props.params?.api?.onDidDimensionsChange(() => map?.invalidateSize())
 }
 
 function setTileLayer(layerNumber: number) {
@@ -92,7 +102,7 @@ function setTileLayer(layerNumber: number) {
     map.removeLayer(tileLayer)
     tileLayer = null
   }
-  tileLayer = L.tileLayer(waybackTileUrl(layerNumber), {
+  tileLayer = new L.TileLayer(waybackTileUrl(layerNumber), {
     maxZoom: 20,
     maxNativeZoom: 20,
   })
@@ -220,6 +230,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  dimensionsListener?.dispose()
   map?.remove()
   map = null
   basemap = null

@@ -42,16 +42,32 @@ import type { CampaignField } from './types/campaign'
 
 const appStore = useAppStore()
 
+function applyThemeAttribute(doc: Document) {
+  doc.documentElement.dataset.theme = appStore.effectiveTheme === 'light' ? 'light' : ''
+}
+
 // Apply theme attribute to <html> so CSS variables switch instantly
 watch(
   () => appStore.effectiveTheme,
-  (t) => { document.documentElement.dataset.theme = t === 'light' ? 'light' : '' },
+  () => applyThemeAttribute(document),
   { immediate: true }
 )
 
 const dockviewTheme = computed(() => appStore.effectiveTheme === 'light' ? themeReplit : themeReplitDark)
 const popoutUrl = `${import.meta.env.BASE_URL}popout.html`
 const layoutStore = useLayoutStore()
+
+// Popouts have their own <html>, and dockview only sets its theme class on them
+// once, when they open.
+watch(dockviewTheme, (theme, previous) => {
+  for (const group of layoutStore.api?.groups ?? []) {
+    const { location } = group.api
+    if (location.type !== 'popout') continue
+    const doc = location.getWindow().document
+    applyThemeAttribute(doc)
+    doc.querySelectorAll(`.${previous.className}`).forEach(el => el.classList.replace(previous.className, theme.className))
+  }
+})
 const campaignStore = useCampaignStore()
 const githubStore = useGithubStore()
 const showSettings = ref(false)

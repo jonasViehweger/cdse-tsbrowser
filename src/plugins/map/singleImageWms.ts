@@ -1,4 +1,4 @@
-import L from 'leaflet'
+import * as L from 'leaflet'
 
 // Sentinel Hub rejects GetMap requests larger than this in either dimension.
 export const MAX_WMS_IMAGE_SIZE = 2500
@@ -26,13 +26,13 @@ export class SingleImageWms extends L.Layer {
     this.params = params
   }
 
-  onAdd(map: L.Map) {
+  onAdd(map: L.LeafletMap) {
     map.on('moveend', this.scheduleUpdate, this)
     this.update()
     return this
   }
 
-  onRemove(map: L.Map) {
+  onRemove(map: L.LeafletMap) {
     map.off('moveend', this.scheduleUpdate, this)
     clearTimeout(this.timer)
     this.pending?.remove()
@@ -84,11 +84,14 @@ export class SingleImageWms extends L.Layer {
       HEIGHT: height,
       ...this.params,
     }
-    const src = this.url + L.Util.getParamString(query, this.url, true)
+    const search = new URLSearchParams(
+      Object.entries(query).map(([key, value]) => [key.toUpperCase(), String(value)]),
+    )
+    const src = `${this.url}?${search}`
 
     this.pending?.remove()
     // tilePane keeps the image below vector overlays such as the pixel marker.
-    const overlay = L.imageOverlay(src, bounds, { interactive: false, pane: 'tilePane' })
+    const overlay = new L.ImageOverlay(src, bounds, { interactive: false, pane: 'tilePane' })
     this.pending = overlay
     overlay.once('load error', (e) => {
       if (this.pending !== overlay) return

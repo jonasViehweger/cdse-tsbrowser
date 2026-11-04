@@ -230,15 +230,19 @@ function destroyChart() {
   }
 }
 
+function resize() {
+  if (uplot) {
+    const { width, height } = getSize()
+    uplot.setSize({ width, height })
+  }
+}
+
+defineExpose({ resize })
+
 onMounted(() => {
   createChart()
 
-  resizeObserver = new ResizeObserver(() => {
-    if (uplot) {
-      const { width, height } = getSize()
-      uplot.setSize({ width, height })
-    }
-  })
+  resizeObserver = new ResizeObserver(resize)
   if (containerRef.value) {
     resizeObserver.observe(containerRef.value)
   }
@@ -283,7 +287,7 @@ watch(
 // Recreate chart when unit or theme change — axis labels and colours are
 // baked into the options at construction time.
 watch(
-  [() => props.unit, () => appStore.theme],
+  [() => props.unit, () => appStore.effectiveTheme],
   () => {
     destroyChart()
     createChart()

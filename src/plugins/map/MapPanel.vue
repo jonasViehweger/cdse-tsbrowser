@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import { useLayoutStore } from '../../stores/layout'
@@ -49,6 +49,7 @@ type PanelApi = {
   id: string
   updateParameters(p: Record<string, unknown>): void
   setTitle(title: string): void
+  onDidDimensionsChange(listener: () => void): { dispose(): void }
 }
 
 const props = defineProps<{
@@ -71,12 +72,13 @@ const errorDetail = ref('')
 const layers = ref<WmsLayer[]>([])
 const layersStatus = ref<'loading' | 'ready' | 'error'>('loading')
 
-let map: L.Map | null = null
+let map: L.LeafletMap | null = null
 let basemap: L.TileLayer | null = null
-let wmsLayer: L.TileLayer.WMS | SingleImageWms | null = null
+let wmsLayer: L.WMSTileLayer | SingleImageWms | null = null
 let wmsBaseUrl = ''
 let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
+let dimensionsListener: { dispose(): void } | undefined
 
 function wmsUrl(instanceId: string) {
   return `${import.meta.env.VITE_API_BASE}/ogc/wms/${instanceId}`
@@ -103,7 +105,7 @@ function syncWmsLayer() {
   wmsLayer?.remove()
   wmsLayer = single
     ? new SingleImageWms(wmsBaseUrl, wmsParams())
-    : L.tileLayer.wms(wmsBaseUrl, { ...wmsParams(), version: '1.1.1' } as L.WMSOptions)
+    : new L.WMSTileLayer(wmsBaseUrl, { ...wmsParams(), version: '1.1.1' } as L.WMSTileLayerOptions)
   wmsLayer.addTo(map)
 }
 
@@ -134,12 +136,12 @@ function initMap(instanceId: string) {
   if (!mapEl.value || map) return
 
   const [lon, lat] = coordinate.value
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView(
+  map = new L.LeafletMap(mapEl.value, { zoomControl: true, attributionControl: false }).setView(
     [lat, lon],
     16
   )
 
-  basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
+  basemap = new L.TileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
 
   wmsBaseUrl = wmsUrl(instanceId)
   syncWmsLayer()
@@ -147,7 +149,7 @@ function initMap(instanceId: string) {
 
   // Pixel outline marker — outline only so the centre pixel stays visible.
   // Bright yellow gives high contrast against natural earth tones in satellite imagery.
-  marker = L.polygon(pixelLatLngs(lon, lat), {
+  marker = new L.Polygon(pixelLatLngs(lon, lat), {
     color: '#ffff00',
     fillOpacity: 0,
     weight: 2,
@@ -158,6 +160,9 @@ function initMap(instanceId: string) {
   // Resize observer so map redraws when the panel is resized by dockview
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
+  // The observer belongs to the main window, so in a popout it can stall until
+  // that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = panelApi()?.onDidDimensionsChange(() => map?.invalidateSize())
 
   status.value = 'ready'
 }
@@ -269,6 +274,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearTimeout(dateTimer)
   resizeObserver?.disconnect()
+  dimensionsListener?.dispose()
   map?.remove()
   map = null
   wmsLayer = null

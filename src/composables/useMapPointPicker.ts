@@ -1,5 +1,5 @@
 import { ref, onUnmounted } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import { useAppStore } from '../stores/app'
 import '../styles/mapPicker.css'
 
@@ -24,7 +24,7 @@ export function useMapPointPicker() {
   const appStore = useAppStore()
   const armed = ref(false)
 
-  let target: L.Map | null = null
+  let target: L.LeafletMap | null = null
   let control: L.Control | null = null
   let button: HTMLAnchorElement | null = null
 
@@ -42,7 +42,7 @@ export function useMapPointPicker() {
     if (e.key === 'Escape') setArmed(false)
   }
 
-  function onMapClick(e: L.LeafletMouseEvent) {
+  function onMapClick(e: L.LeafletPointerEvent) {
     if (!armed.value && !(e.originalEvent as MouseEvent).shiftKey) return
     // wrap() keeps longitudes in [-180, 180] after the user pans across the
     // date line, where Leaflet reports 190° and the API expects -170°.
@@ -51,8 +51,9 @@ export function useMapPointPicker() {
     appStore.setCoordinate(lng, lat)
   }
 
-  const PickControl = L.Control.extend({
-    options: { position: 'topright' as L.ControlPosition },
+  class PickControl extends L.Control {
+    static defaultOptions = { position: 'topright' as L.ControlPosition }
+
     onAdd() {
       const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-pick-control')
       const a = L.DomUtil.create('a', 'map-pick-btn', container) as HTMLAnchorElement
@@ -69,10 +70,10 @@ export function useMapPointPicker() {
       })
       button = a
       return container
-    },
-  })
+    }
+  }
 
-  function attach(map: L.Map) {
+  function attach(map: L.LeafletMap) {
     detach()
     target = map
     control = new PickControl()
