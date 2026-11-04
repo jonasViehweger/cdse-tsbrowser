@@ -41,7 +41,13 @@ import { buildPixelPolygon } from '../../utils/geometry'
 import { useMapPointPicker } from '../../composables/useMapPointPicker'
 
 const props = defineProps<{
-  params?: { params?: Record<string, unknown>; api?: { updateParameters(p: Record<string, unknown>): void } }
+  params?: {
+    params?: Record<string, unknown>
+    api?: {
+      updateParameters(p: Record<string, unknown>): void
+      onDidDimensionsChange(listener: () => void): { dispose(): void }
+    }
+  }
 }>()
 
 const appStore = useAppStore()
@@ -71,6 +77,7 @@ let basemap: L.TileLayer | null = null
 let tileLayer: L.TileLayer | null = null
 let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
+let dimensionsListener: { dispose(): void } | undefined
 
 function initMap() {
   if (!mapEl.value || map) return
@@ -84,6 +91,9 @@ function initMap() {
   pointPicker.attach(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
+  // The observer belongs to the main window, so in a popout it can stall until
+  // that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = props.params?.api?.onDidDimensionsChange(() => map?.invalidateSize())
 }
 
 function setTileLayer(layerNumber: number) {
@@ -220,6 +230,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  dimensionsListener?.dispose()
   map?.remove()
   map = null
   basemap = null

@@ -49,6 +49,7 @@ type PanelApi = {
   id: string
   updateParameters(p: Record<string, unknown>): void
   setTitle(title: string): void
+  onDidDimensionsChange(listener: () => void): { dispose(): void }
 }
 
 const props = defineProps<{
@@ -77,6 +78,7 @@ let wmsLayer: L.WMSTileLayer | SingleImageWms | null = null
 let wmsBaseUrl = ''
 let marker: L.Polygon | null = null
 let resizeObserver: ResizeObserver | null = null
+let dimensionsListener: { dispose(): void } | undefined
 
 function wmsUrl(instanceId: string) {
   return `${import.meta.env.VITE_API_BASE}/ogc/wms/${instanceId}`
@@ -158,6 +160,9 @@ function initMap(instanceId: string) {
   // Resize observer so map redraws when the panel is resized by dockview
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
+  // The observer belongs to the main window, so in a popout it can stall until
+  // that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = panelApi()?.onDidDimensionsChange(() => map?.invalidateSize())
 
   status.value = 'ready'
 }
@@ -269,6 +274,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearTimeout(dateTimer)
   resizeObserver?.disconnect()
+  dimensionsListener?.dispose()
   map?.remove()
   map = null
   wmsLayer = null

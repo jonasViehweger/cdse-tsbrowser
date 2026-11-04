@@ -91,7 +91,7 @@ import type { SampleRecord } from '../../types/campaign'
 // dockview hands the panel API in under `params`; we only need the id, to
 // register this panel's settings with the group header.
 const props = defineProps<{
-  params?: { api?: { id: string } }
+  params?: { api?: { id: string; onDidDimensionsChange(listener: () => void): { dispose(): void } } }
 }>()
 
 const appStore = useAppStore()
@@ -103,6 +103,7 @@ let map: L.LeafletMap | null = null
 let basemap: L.TileLayer | null = null
 const markerLayer = new L.LayerGroup()
 let resizeObserver: ResizeObserver | null = null
+let dimensionsListener: { dispose(): void } | undefined
 
 const completedCount = computed(() =>
   campaignStore.features.filter(f => campaignStore.labellingStatus(f.properties.sample_id) === 'complete').length
@@ -370,7 +371,7 @@ function buildMarkers() {
 }
 
 watch(
-  [() => campaignStore.features, () => campaignStore.sampleRecords, () => appStore.coordinate, () => appStore.theme],
+  [() => campaignStore.features, () => campaignStore.sampleRecords, () => appStore.coordinate, () => appStore.effectiveTheme],
   () => buildMarkers(),
 )
 
@@ -391,6 +392,9 @@ function initMap() {
   markerLayer.addTo(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
+  // The observer belongs to the main window, so in a popout it can stall until
+  // that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = props.params?.api?.onDidDimensionsChange(() => map?.invalidateSize())
   buildMarkers()
 }
 
@@ -398,6 +402,7 @@ onMounted(() => initMap())
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  dimensionsListener?.dispose()
   map?.remove()
   map = null
 })

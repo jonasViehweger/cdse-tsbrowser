@@ -12,6 +12,7 @@
         {{ appStore.selectedDate }}
       </span>
       <TimeSeriesChart
+        ref="chartRef"
         :data="data"
         :flags="flags"
         :flag-labels="flagLabels"
@@ -128,6 +129,7 @@ type PanelApi = {
   id: string
   updateParameters(p: Record<string, unknown>): void
   setTitle(title: string): void
+  onDidDimensionsChange(listener: () => void): { dispose(): void }
 }
 
 const props = defineProps<{
@@ -258,9 +260,17 @@ watch(() => props.params?.params, (p) => {
   nextTick(() => panelApi()?.setTitle(dataSource.value?.name ?? 'Time Series'))
 })
 
+const chartRef = ref<InstanceType<typeof TimeSeriesChart> | null>(null)
+let dimensionsListener: { dispose(): void } | undefined
+
 onMounted(() => {
   if (dataSource.value) panelApi()?.setTitle(dataSource.value.name)
+  // The chart's observer belongs to the main window, so in a popout it can stall
+  // until that window next renders. Dockview's event follows the popout's own resize.
+  dimensionsListener = panelApi()?.onDidDimensionsChange(() => chartRef.value?.resize())
 })
+
+onUnmounted(() => dimensionsListener?.dispose())
 
 // ── Data & display ──────────────────────────────────────────────────────────
 
