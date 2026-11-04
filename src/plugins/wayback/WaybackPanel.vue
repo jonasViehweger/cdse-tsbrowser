@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import {
@@ -66,7 +66,7 @@ const statusText = computed(() => {
   return `${found} release${found === 1 ? '' : 's'}`
 })
 
-let map: L.Map | null = null
+let map: L.LeafletMap | null = null
 let basemap: L.TileLayer | null = null
 let tileLayer: L.TileLayer | null = null
 let marker: L.Polygon | null = null
@@ -75,9 +75,9 @@ let resizeObserver: ResizeObserver | null = null
 function initMap() {
   if (!mapEl.value || map) return
   const [lon, lat] = appStore.coordinate
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 17)
-  basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
-  marker = L.polygon(
+  map = new L.LeafletMap(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 17)
+  basemap = new L.TileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
+  marker = new L.Polygon(
     buildPixelPolygon(lon, lat).coordinates[0].map(([lng, la]) => [la, lng] as L.LatLngExpression),
     { color: '#ffff00', fillOpacity: 0, weight: 2 },
   ).addTo(map)
@@ -92,7 +92,7 @@ function setTileLayer(layerNumber: number) {
     map.removeLayer(tileLayer)
     tileLayer = null
   }
-  tileLayer = L.tileLayer(waybackTileUrl(layerNumber), {
+  tileLayer = new L.TileLayer(waybackTileUrl(layerNumber), {
     maxZoom: 20,
     maxNativeZoom: 20,
   })

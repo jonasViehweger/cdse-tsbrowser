@@ -78,7 +78,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import L from 'leaflet'
+import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAppStore } from '../../stores/app'
 import { useCampaignStore } from '../../stores/campaign'
@@ -99,9 +99,9 @@ const campaignStore = useCampaignStore()
 const settingsStore = usePanelSettingsStore()
 
 const mapEl = ref<HTMLDivElement | null>(null)
-let map: L.Map | null = null
+let map: L.LeafletMap | null = null
 let basemap: L.TileLayer | null = null
-const markerLayer = L.layerGroup()
+const markerLayer = new L.LayerGroup()
 let resizeObserver: ResizeObserver | null = null
 
 const completedCount = computed(() =>
@@ -353,7 +353,7 @@ function buildMarkers() {
     const isSelected = appStore.coordinate[0] === lon && appStore.coordinate[1] === lat
     const colour = markerColour(status, isSelected)
 
-    const marker = L.circleMarker([lat, lon], {
+    const marker = new L.CircleMarker([lat, lon], {
       radius: 6,
       color: colour,
       fillColor: colour,
@@ -386,8 +386,8 @@ watch(() => appStore.theme, () => { basemap?.setUrl(basemapUrl()) })
 function initMap() {
   if (!mapEl.value || map) return
   const [lon, lat] = appStore.coordinate
-  map = L.map(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 10)
-  basemap = L.tileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
+  map = new L.LeafletMap(mapEl.value, { zoomControl: true, attributionControl: false }).setView([lat, lon], 10)
+  basemap = new L.TileLayer(basemapUrl(), { maxZoom: 19 }).addTo(map)
   markerLayer.addTo(map)
   resizeObserver = new ResizeObserver(() => map?.invalidateSize())
   resizeObserver.observe(mapEl.value)
